@@ -14,6 +14,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
@@ -40,12 +42,19 @@ type Collector struct {
 	nodeLister corelisters.NodeLister
 	podLister  corelisters.PodLister
 
-	mu       sync.RWMutex
-	latest   *model.Snapshot
-	subs     map[chan *model.Snapshot]struct{}
-	diskByNode map[string]model.Disk
-	diskLive   bool
-	lastDisk   time.Time
+	mu           sync.RWMutex
+	latest       *model.Snapshot
+	subs         map[chan *model.Snapshot]struct{}
+	diskByNode   map[string]model.Disk
+	diskLive     bool
+	diskFailures int
+	lastDisk     time.Time
+
+	// Metrics hysteresis state; only the poll goroutine touches these.
+	metricsUp       bool
+	metricsFailures int
+	lastPodUsage    map[string]model.Resources
+	lastNodeUsage   map[string]model.Resources
 
 	diskForbiddenOnce sync.Once
 	logf              func(format string, args ...any)
@@ -54,6 +63,10 @@ type Collector struct {
 // diskInterval is how often the per-node Summary API fan-out runs. Disk fills
 // slowly; hitting every kubelet on the CPU/RAM cadence would be wasted load.
 const diskInterval = 60 * time.Second
+
+// capFailThreshold is how many consecutive transient failures it takes to
+// drop a capability. One apiserver blip must not flap the UI banner.
+const capFailThreshold = 3
 
 func New(clients *kube.Clients, pollInterval time.Duration) *Collector {
 	factory := informers.NewSharedInformerFactory(clients.Core, 10*time.Minute)
@@ -65,7 +78,12 @@ func New(clients *kube.Clients, pollInterval time.Duration) *Collector {
 		podLister:    factory.Core().V1().Pods().Lister(),
 		subs:         make(map[chan *model.Snapshot]struct{}),
 		diskByNode:   map[string]model.Disk{},
-		logf:         log.Printf,
+		// Start optimistic: a definitive absence or a failure streak flips
+		// these with one transition log, instead of a spurious "restored"
+		// on the first successful poll.
+		metricsUp: true,
+		diskLive:  true,
+		logf:      log.Printf,
 	}
 	return c
 }
@@ -137,7 +155,8 @@ func (c *Collector) poll(ctx context.Context) {
 		return
 	}
 
-	podUsage, nodeUsage, metricsOK := c.fetchMetrics(ctx)
+	podUsage, nodeUsage, metricsErr := c.fetchMetrics(ctx)
+	podUsage, nodeUsage, metricsOK := c.noteMetrics(podUsage, nodeUsage, metricsErr)
 	diskByNode, diskLive := c.currentDisk(ctx, nodes)
 
 	// Group scheduled, non-terminal pods by node.
@@ -202,7 +221,8 @@ func (c *Collector) poll(ctx context.Context) {
 
 // fetchMetrics polls the Metrics Server. A failure is not an error condition:
 // many clusters simply don't run it, so we degrade to requests/limits-only.
-func (c *Collector) fetchMetrics(ctx context.Context) (map[string]model.Resources, map[string]model.Resources, bool) {
+// The error is returned raw so noteMetrics can classify it.
+func (c *Collector) fetchMetrics(ctx context.Context) (map[string]model.Resources, map[string]model.Resources, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -211,7 +231,7 @@ func (c *Collector) fetchMetrics(ctx context.Context) (map[string]model.Resource
 
 	nodeMetrics, err := c.clients.Metrics.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return podUsage, nodeUsage, false
+		return podUsage, nodeUsage, err
 	}
 	for _, nm := range nodeMetrics.Items {
 		nodeUsage[nm.Name] = model.Resources{
@@ -221,7 +241,7 @@ func (c *Collector) fetchMetrics(ctx context.Context) (map[string]model.Resource
 	}
 	podMetrics, err := c.clients.Metrics.MetricsV1beta1().PodMetricses(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return podUsage, nodeUsage, false
+		return podUsage, nodeUsage, err
 	}
 	for _, pm := range podMetrics.Items {
 		var u model.Resources
@@ -231,7 +251,45 @@ func (c *Collector) fetchMetrics(ctx context.Context) (map[string]model.Resource
 		}
 		podUsage[pm.Namespace+"/"+pm.Name] = u
 	}
-	return podUsage, nodeUsage, true
+	return podUsage, nodeUsage, nil
+}
+
+// metricsAbsent reports whether err means the metrics.k8s.io API group is not
+// installed at all, as opposed to a transient failure reaching it.
+func metricsAbsent(err error) bool {
+	return errors.IsNotFound(err) || meta.IsNoMatchError(err)
+}
+
+// noteMetrics folds one fetch result into the metrics capability state and
+// returns the usage maps to build the snapshot from. Definitive absence drops
+// the capability immediately; transient errors keep the last-known usage and
+// the previous capability until capFailThreshold consecutive failures. Only
+// called from the poll goroutine.
+func (c *Collector) noteMetrics(podUsage, nodeUsage map[string]model.Resources, err error) (map[string]model.Resources, map[string]model.Resources, bool) {
+	switch {
+	case err == nil:
+		if !c.metricsUp {
+			c.logf("metrics capability restored")
+		}
+		c.metricsUp = true
+		c.metricsFailures = 0
+		c.lastPodUsage, c.lastNodeUsage = podUsage, nodeUsage
+	case metricsAbsent(err):
+		if c.metricsUp {
+			c.logf("metrics.k8s.io not available: %v (degrading to requests/limits-only)", err)
+		}
+		c.metricsUp = false
+		c.metricsFailures = 0
+		c.lastPodUsage, c.lastNodeUsage = nil, nil
+	default:
+		c.metricsFailures++
+		if c.metricsUp && c.metricsFailures >= capFailThreshold {
+			c.logf("metrics capability lost after %d consecutive failures: %v", c.metricsFailures, err)
+			c.metricsUp = false
+			c.lastPodUsage, c.lastNodeUsage = nil, nil
+		}
+	}
+	return c.lastPodUsage, c.lastNodeUsage, c.metricsUp
 }
 
 // currentDisk returns cached Summary API results, refreshing them on the
@@ -249,13 +307,35 @@ func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[
 	for _, n := range nodes {
 		names = append(names, n.Name)
 	}
-	disk, ok := c.fetchDisk(ctx, names)
+	disk, err := c.fetchDisk(ctx, names)
+
 	c.mu.Lock()
-	c.diskByNode = disk
-	c.diskLive = ok
+	defer c.mu.Unlock()
 	c.lastDisk = time.Now()
-	c.mu.Unlock()
-	return disk, ok
+	switch {
+	case err == nil:
+		if !c.diskLive {
+			c.logf("disk capability restored")
+		}
+		c.diskByNode = disk
+		c.diskLive = true
+		c.diskFailures = 0
+	case errors.IsForbidden(err):
+		// Definitive: RBAC won't heal on its own, so no hysteresis and no
+		// stale cache to serve. noteDiskForbidden already logged the hint.
+		c.diskByNode = disk
+		c.diskLive = false
+		c.diskFailures = 0
+	default:
+		// Transient: keep the cached per-node data and the previous
+		// capability until the failure streak proves the signal is gone.
+		c.diskFailures++
+		if c.diskLive && c.diskFailures >= capFailThreshold {
+			c.logf("disk capability lost after %d consecutive refresh failures: %v", c.diskFailures, err)
+			c.diskLive = false
+		}
+	}
+	return c.diskByNode, c.diskLive
 }
 
 func nodeReady(n *corev1.Node) bool {

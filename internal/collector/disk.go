@@ -27,16 +27,18 @@ type statsSummary struct {
 const diskFetchConcurrency = 8
 
 // fetchDisk queries /api/v1/nodes/{node}/proxy/stats/summary for every node
-// with bounded concurrency. It returns per-node disk stats and whether the
-// signal is available at all (false when every fetch failed, e.g. nodes/proxy
-// is forbidden on this cluster).
-func (c *Collector) fetchDisk(ctx context.Context, nodeNames []string) (map[string]model.Disk, bool) {
+// with bounded concurrency. It returns per-node disk stats; the error is nil
+// when at least one node answered, otherwise a representative failure for the
+// caller to classify. A Forbidden error wins the pick because it is the
+// definitive (RBAC) case, not a transient one.
+func (c *Collector) fetchDisk(ctx context.Context, nodeNames []string) (map[string]model.Disk, error) {
 	results := make(map[string]model.Disk, len(nodeNames))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, diskFetchConcurrency)
 
 	anyOK := false
+	var lastErr error
 	for _, name := range nodeNames {
 		wg.Add(1)
 		sem <- struct{}{}
@@ -50,6 +52,9 @@ func (c *Collector) fetchDisk(ctx context.Context, nodeNames []string) (map[stri
 				if errors.IsForbidden(err) {
 					c.noteDiskForbidden()
 				}
+				if lastErr == nil || errors.IsForbidden(err) {
+					lastErr = err
+				}
 				return
 			}
 			results[name] = disk
@@ -57,7 +62,10 @@ func (c *Collector) fetchDisk(ctx context.Context, nodeNames []string) (map[stri
 		}(name)
 	}
 	wg.Wait()
-	return results, anyOK
+	if anyOK {
+		return results, nil
+	}
+	return results, lastErr
 }
 
 func (c *Collector) fetchNodeDisk(ctx context.Context, nodeName string) (model.Disk, error) {
