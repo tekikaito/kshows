@@ -42,6 +42,11 @@ type Collector struct {
 	nodeLister corelisters.NodeLister
 	podLister  corelisters.PodLister
 
+	// diskFetch performs the kubelet Summary API fan-out. It is a function
+	// field so tests can substitute it: the fake clientset cannot serve
+	// CoreV1().RESTClient() calls. Production always uses (*Collector).fetchDisk.
+	diskFetch func(ctx context.Context, names []string) (map[string]model.Disk, error)
+
 	mu           sync.RWMutex
 	latest       *model.Snapshot
 	subs         map[chan *model.Snapshot]struct{}
@@ -85,6 +90,7 @@ func New(clients *kube.Clients, pollInterval time.Duration) *Collector {
 		diskLive:  true,
 		logf:      log.Printf,
 	}
+	c.diskFetch = c.fetchDisk
 	return c
 }
 
@@ -307,7 +313,7 @@ func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[
 	for _, n := range nodes {
 		names = append(names, n.Name)
 	}
-	disk, err := c.fetchDisk(ctx, names)
+	disk, err := c.diskFetch(ctx, names)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -333,6 +339,11 @@ func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[
 		if c.diskLive && c.diskFailures >= capFailThreshold {
 			c.logf("disk capability lost after %d consecutive refresh failures: %v", c.diskFailures, err)
 			c.diskLive = false
+			// Drop the stale per-node data along with the capability: serving
+			// Live disk figures while the capability banner says "no disk
+			// signal" would contradict itself. Nodes fall back to
+			// capacity-only until a fetch succeeds again.
+			c.diskByNode = map[string]model.Disk{}
 		}
 	}
 	return c.diskByNode, c.diskLive
