@@ -73,19 +73,33 @@ with request, limit, actual, and %-of-request per pod.
 
 ## Quickstart
 
-**In-cluster (primary):**
+**Helm (in-cluster, recommended):**
+
+```sh
+helm install kshows oci://ghcr.io/tekikaito/charts/kshows \
+  --namespace kshows --create-namespace
+
+kubectl -n kshows port-forward svc/kshows 8080:80
+# open http://localhost:8080
+```
+
+If your cluster restricts the kubelet proxy or has no Metrics Server, turn the
+matching permission off — kshows narrows the UI instead of failing:
+`--set rbac.nodesProxy=false`, `--set rbac.metrics=false`. See the
+[chart README](charts/kshows/README.md) for all values.
+
+**Plain manifests**, if you'd rather not use Helm:
 
 ```sh
 kubectl apply -f https://github.com/tekikaito/kshows/releases/latest/download/rbac.yaml
 kubectl apply -f https://github.com/tekikaito/kshows/releases/latest/download/deployment.yaml
 kubectl -n kshows port-forward svc/kshows 8080:80
-# open http://localhost:8080
 ```
 
-Read the manifests before applying them — you should for anything that gets a
-ClusterRole. They create a namespace, a ServiceAccount, a read-only
-ClusterRole, a 1-replica Deployment, and a ClusterIP Service. Prebuilt images
-are published to `ghcr.io/tekikaito/kshows`.
+Read them before applying — you should for anything that gets a ClusterRole.
+They create a namespace, a ServiceAccount, a read-only ClusterRole, a
+1-replica Deployment, and a ClusterIP Service. Images are published to
+`ghcr.io/tekikaito/kshows`.
 
 **Local, against your kubeconfig:**
 

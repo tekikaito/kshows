@@ -1,0 +1,23 @@
+apiVersion: v2
+name: kshows
+description: A spatial map of Kubernetes node capacity — pods packed into node rectangles by actual usage vs. requests, across CPU, RAM and disk. Read-only.
+type: application
+# Kept in lockstep with the application: this chart exists to ship kshows, not
+# as an independently versioned artifact.
+version: 0.3.0
+appVersion: "v0.3.0"
+home: https://github.com/tekikaito/kshows
+sources:
+  - https://github.com/tekikaito/kshows
+keywords:
+  - kubernetes
+  - capacity
+  - visualization
+  - treemap
+  - observability
+maintainers:
+  - name: tekikaito
+    url: https://github.com/tekikaito
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "false"

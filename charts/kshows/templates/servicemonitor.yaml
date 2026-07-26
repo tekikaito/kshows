@@ -1,0 +1,32 @@
+{{- /*
+Rendered purely from the opt-in flag, with no .Capabilities guard: guarding
+would make `helm template` fail for GitOps tools that render the chart without
+talking to a cluster. Enabling this without the Prometheus Operator CRDs fails
+at apply time with a clear "no matches for kind ServiceMonitor".
+*/ -}}
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "kshows.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kshows.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "kshows.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      {{- with .Values.serviceMonitor.scrapeTimeout }}
+      scrapeTimeout: {{ . }}
+      {{- end }}
+{{- end }}

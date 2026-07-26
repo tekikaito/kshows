@@ -1,0 +1,35 @@
+kshows {{ .Chart.AppVersion }} is installed as {{ include "kshows.fullname" . }}.
+
+Reach it:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+{{- range .paths }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
+{{- end }}
+{{- end }}
+
+  WARNING: kshows has no built-in authentication. Anyone who can reach this
+  Ingress can see every node and pod in the cluster. Put authentication in
+  front of it.
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kshows.fullname" . }} 8080:{{ .Values.service.port }}
+
+  then open http://localhost:8080
+{{- end }}
+
+Signals enabled by this release:
+{{- if .Values.rbac.create }}
+  CPU / RAM usage    {{ if .Values.rbac.metrics }}yes — requires Metrics Server in the cluster{{ else }}NO — rbac.metrics=false, showing requests/limits only{{ end }}
+  Node disk          {{ if .Values.rbac.nodesProxy }}yes — via the kubelet Summary API{{ else }}NO — rbac.nodesProxy=false, showing disk capacity only{{ end }}
+{{- else }}
+  rbac.create=false — kshows uses the existing ServiceAccount {{ include "kshows.serviceAccountName" . }}.
+  It needs get/list/watch on nodes and pods; anything missing degrades that
+  dimension with a banner rather than failing.
+{{- end }}
+
+kshows is read-only. It holds no write permission and has no code path that
+writes to the Kubernetes API.
+{{ if not .Values.serviceMonitor.enabled }}
+Its own operating metrics (poll timing, signal health, SSE clients) are at
+/metrics. Set serviceMonitor.enabled=true if you run the Prometheus Operator.
+{{- end }}

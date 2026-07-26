@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-26
+
+### Added
+
+- **Helm chart**, published to `oci://ghcr.io/tekikaito/charts/kshows`. The two
+  optional permissions are values: `rbac.metrics` and `rbac.nodesProxy` can be
+  withheld on clusters that restrict them, and kshows narrows the UI instead of
+  failing. Also covers Ingress, a Prometheus Operator `ServiceMonitor`,
+  scheduling controls, and an existing-ServiceAccount mode. The plain manifests
+  in `deploy/` remain supported.
+
+### Fixed
+
+- The node-level disk note clipped mid-word when live usage was unavailable.
+  The banner already carries the full explanation, so the per-card note is now
+  terse enough to fit.
+
 ## [0.2.0] - 2026-07-26
 
 ### Added
@@ -66,7 +83,8 @@ First release. Live, read-only, point-in-time capacity visualization.
 - **Deployment manifests** with a strictly read-only ClusterRole, a hardened
   non-root pod spec, and a distroless multi-arch container image.
 
-[Unreleased]: https://github.com/tekikaito/kshows/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/tekikaito/kshows/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/tekikaito/kshows/releases/tag/v0.3.0
 [0.2.0]: https://github.com/tekikaito/kshows/releases/tag/v0.2.0
 [0.1.1]: https://github.com/tekikaito/kshows/releases/tag/v0.1.1
 [0.1.0]: https://github.com/tekikaito/kshows/releases/tag/v0.1.0

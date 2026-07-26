@@ -538,8 +538,10 @@ function renderDiskSVG(svg, node, W, H) {
       `${fmtBytes(used)} used of ${fmtBytes(cap)} · ${fmtBytes(node.disk.availableBytes)} free`);
   } else if (cap > 0) {
     mk("text", { class: "detail", x: barX, y: barY + barH + 24 }, `capacity ${fmtBytes(cap)}`);
+    // Terse on purpose: the banner above carries the full explanation, and a
+    // longer string clips at the card edge.
     mk("text", { class: "note", x: barX, y: barY + barH + 42 },
-      "live usage unavailable — kubelet stats not reachable (nodes/proxy)");
+      "live usage unavailable (nodes/proxy)");
   } else {
     mk("text", { class: "note", x: barX, y: barY + barH + 24 }, "no disk signal for this node");
   }

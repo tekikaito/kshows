@@ -57,6 +57,29 @@ jobs:
       # every new install, so validate the manifests against the API schemas.
       - run: go install github.com/yannh/kubeconform/cmd/kubeconform@latest
       - run: kubeconform -strict -summary deploy/
+      # The chart is a second install path for the same resources; render it
+      # and validate the output the same way.
+      - uses: azure/setup-helm@v4
+      - run: helm lint charts/kshows
+      - name: Validate rendered chart (default and degraded RBAC)
+        run: |
+          helm template kshows charts/kshows | kubeconform -strict -summary -
+          helm template kshows charts/kshows \
+            --set rbac.nodesProxy=false --set rbac.metrics=false \
+            --set ingress.enabled=true --set serviceMonitor.enabled=true \
+            | kubeconform -strict -summary -skip ServiceMonitor -
+      # Container tags carry no "v" prefix — that belongs to the git tag only.
+      # Defaulting the chart's tag from appVersion has pulled a nonexistent
+      # image once already; fail here rather than in someone's cluster.
+      - name: Chart resolves to a v-less image tag
+        run: |
+          set -euo pipefail
+          ref=$(helm template kshows charts/kshows | grep -oP '(?<=image: ").*(?=")')
+          echo "chart resolves to: $ref"
+          tag="${ref##*:}"
+          case "$tag" in
+            v*) echo "::error::image tag '$tag' has a leading v; no such tag is published"; exit 1 ;;
+          esac
 
   image:
     name: Image build

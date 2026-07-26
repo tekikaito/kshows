@@ -63,3 +63,26 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v4
+      - name: Package and push chart
+        run: |
+          set -euo pipefail
+          # Chart version tracks the app version; strip the tag's "v" because
+          # chart versions must be bare semver.
+          VERSION="${GITHUB_REF_NAME#v}"
+          helm package charts/kshows \
+            --version "$VERSION" \
+            --app-version "$GITHUB_REF_NAME" \
+            --destination dist
+          echo '${{ secrets.GITHUB_TOKEN }}' | \
+            helm registry login ghcr.io -u '${{ github.actor }}' --password-stdin
+          helm push "dist/kshows-${VERSION}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"

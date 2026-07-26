@@ -1,0 +1,112 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/tekikaito/kshows
+  # Defaults to the chart's appVersion. Pin explicitly to override.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  # Generated from the release name when empty.
+  name: ""
+  annotations: {}
+
+# kshows is read-only: no rule below grants a write verb, and there is no code
+# path that issues one. The two optional grants can be withheld — kshows
+# detects the missing permission and degrades to a narrower view with an
+# explanatory banner rather than failing.
+rbac:
+  create: true
+  # Live per-node disk usage via the kubelet Summary API. Some managed
+  # clusters restrict nodes/proxy; without it, disk shows capacity only.
+  nodesProxy: true
+  # Live CPU/RAM usage from the Metrics Server. Without it, kshows shows
+  # reserved capacity (requests/limits) and disables the actual-usage view.
+  metrics: true
+
+collector:
+  # Metrics Server resolves at roughly this cadence; polling faster gains
+  # nothing. Node disk refreshes on a slower internal timer.
+  pollInterval: 15s
+
+# Extra flags for the container, e.g. ["--kubeconfig=/etc/kube/config"].
+extraArgs: []
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+# kshows has NO built-in authentication: anyone who can reach it sees the
+# cluster's node and pod inventory. Enabling an Ingress publishes that. Put
+# authentication in front of it, or stick to `kubectl port-forward`.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: kshows.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Scrape kshows' own operating metrics (poll timing, signal health, SSE
+# clients) — not cluster capacity, which is kube-state-metrics' job.
+serviceMonitor:
+  # Requires the Prometheus Operator CRDs to be installed already.
+  enabled: false
+  interval: 30s
+  scrapeTimeout: ""
+  labels: {}
+
+# Annotation-based scraping, for a Prometheus without the Operator. Harmless
+# when unused.
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: /metrics
+
+podLabels: {}
+
+# Memory scales with cluster size: informers cache node and pod objects, so a
+# cluster with thousands of pods needs more headroom than this default.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
