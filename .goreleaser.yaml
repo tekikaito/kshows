@@ -1,0 +1,65 @@
+version: 2
+
+project_name: kshows
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: kshows
+    main: ./cmd/kshows
+    binary: kshows
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: kshows
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # The manifests ship in the archive so an operator can install from a
+    # release tarball without cloning.
+    files:
+      - README.md
+      - LICENSE
+      - NOTICE
+      - deploy/*
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  footer: |
+    ## Container image
+
+    ```
+    ghcr.io/tekikaito/kshows:{{ .Tag }}
+    ```
+
+    ## Install
+
+    ```sh
+    kubectl apply -f https://github.com/tekikaito/kshows/releases/download/{{ .Tag }}/rbac.yaml
+    kubectl apply -f https://github.com/tekikaito/kshows/releases/download/{{ .Tag }}/deployment.yaml
+    kubectl -n kshows port-forward svc/kshows 8080:80
+    ```
+  extra_files:
+    - glob: deploy/rbac.yaml
+    - glob: deploy/deployment.yaml

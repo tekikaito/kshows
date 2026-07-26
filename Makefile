@@ -1,12 +1,14 @@
-IMAGE ?= ghcr.io/tekikaito/kshows:latest
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+IMAGE ?= ghcr.io/tekikaito/kshows:$(VERSION)
+LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test vet lint run-mock image deploy
+.PHONY: build test vet lint run-mock image deploy clean
 
 build:
-	go build -o bin/kshows ./cmd/kshows
+	go build -trimpath -ldflags="$(LDFLAGS)" -o bin/kshows ./cmd/kshows
 
 test:
-	go test ./...
+	go test -race ./...
 	node --test web/static/*.test.mjs
 
 vet:
@@ -24,7 +26,10 @@ run-mock: build
 	./bin/kshows --mock
 
 image:
-	docker build -t $(IMAGE) .
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE) .
 
 deploy:
 	kubectl apply -f deploy/rbac.yaml -f deploy/deployment.yaml
+
+clean:
+	rm -rf bin dist

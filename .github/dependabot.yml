@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # client-go moves fast and carries the cluster-facing attack surface —
+  # weekly is the right cadence to catch CVE bumps without churn.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      k8s:
+        patterns:
+          - "k8s.io/*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

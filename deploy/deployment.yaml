@@ -23,7 +23,9 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kshows
-          image: ghcr.io/tekikaito/kshows:latest
+          # Pinned deliberately: :latest makes a rollout non-reproducible and
+          # hides which version a cluster is actually running.
+          image: ghcr.io/tekikaito/kshows:v0.1.0
           args: ["--listen=:8080"]
           ports:
             - name: http

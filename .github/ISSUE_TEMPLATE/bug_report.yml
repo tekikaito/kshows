@@ -1,0 +1,55 @@
+name: Bug report
+description: Something renders wrong, crashes, or reports the wrong numbers
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: kshows version
+      description: Output of `kshows --version`, or the image tag you deployed.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: k8s
+    attributes:
+      label: Kubernetes distribution and version
+      description: Output of `kubectl version --short`, plus the distribution.
+      placeholder: k3s v1.34.3+k3s1 / EKS 1.30 / kubeadm 1.29
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How are you running it?
+      options:
+        - In-cluster (Deployment)
+        - Local (kubeconfig)
+        - Mock mode (--mock)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Startup logs
+      description: >
+        The first few lines kshows logs. Capability problems (missing Metrics
+        Server, restricted nodes/proxy) almost always show up there.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots are very welcome for rendering issues.

@@ -1,5 +1,10 @@
 # kshows
 
+[![CI](https://github.com/tekikaito/kshows/actions/workflows/ci.yml/badge.svg)](https://github.com/tekikaito/kshows/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/tekikaito/kshows)](https://goreportcard.com/report/github.com/tekikaito/kshows)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/tekikaito/kshows?include_prereleases&sort=semver)](https://github.com/tekikaito/kshows/releases)
+
 **See your cluster the way the scheduler can't: as physical space.**
 
 kshows draws every Kubernetes node as a rectangle and packs its pods inside,
@@ -71,10 +76,16 @@ with request, limit, actual, and %-of-request per pod.
 **In-cluster (primary):**
 
 ```sh
-kubectl apply -f deploy/rbac.yaml -f deploy/deployment.yaml
+kubectl apply -f https://github.com/tekikaito/kshows/releases/latest/download/rbac.yaml
+kubectl apply -f https://github.com/tekikaito/kshows/releases/latest/download/deployment.yaml
 kubectl -n kshows port-forward svc/kshows 8080:80
 # open http://localhost:8080
 ```
+
+Read the manifests before applying them — you should for anything that gets a
+ClusterRole. They create a namespace, a ServiceAccount, a read-only
+ClusterRole, a 1-replica Deployment, and a ClusterIP Service. Prebuilt images
+are published to `ghcr.io/tekikaito/kshows`.
 
 **Local, against your kubeconfig:**
 
@@ -145,4 +156,17 @@ Live, point-in-time, read-only. Deliberately **not** included: history and
 trends, per-pod disk / PV attribution, cost allocation, rightsizing
 recommendations, multi-cluster, write operations (that one's permanent).
 
-License: TBD.
+## Contributing & security
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development loop and the one non-negotiable rule (kshows stays read-only).
+
+For the security posture, what kshows can read, and how to report a
+vulnerability privately, see [SECURITY.md](SECURITY.md). One thing worth
+repeating here: **kshows has no built-in end-user authentication.** Anyone who
+can reach the port sees your whole node and pod inventory, so if you expose it
+beyond `port-forward`, put auth in front of it.
+
+## License
+
+[Apache License 2.0](LICENSE) — see [NOTICE](NOTICE).

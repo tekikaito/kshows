@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -18,12 +19,21 @@ import (
 	"github.com/tekikaito/kshows/web"
 )
 
+// version is stamped at build time with -ldflags "-X main.version=…".
+var version = "dev"
+
 func main() {
 	listen := flag.String("listen", ":8080", "address to serve HTTP on")
 	kubeconfig := flag.String("kubeconfig", "", "path to kubeconfig (local mode; defaults to standard loading rules)")
 	pollInterval := flag.Duration("poll-interval", 15*time.Second, "how often to refresh usage from the Metrics Server")
 	mock := flag.Bool("mock", false, "serve simulated cluster data (no cluster needed; for demos and UI development)")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("kshows", version)
+		return
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -62,7 +72,7 @@ func main() {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	log.Printf("kshows serving on %s", *listen)
+	log.Printf("kshows %s serving on %s", version, *listen)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("http server: %v", err)
 	}

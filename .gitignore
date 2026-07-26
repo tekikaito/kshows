@@ -1,4 +1,5 @@
 bin/
+dist/
 *.png
 !docs/*.png
 PRD.md

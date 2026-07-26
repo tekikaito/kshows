@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a capability or a change in behavior
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Before filing: kshows is deliberately narrow. Historical trends,
+        per-pod disk and PV attribution, cost allocation, rightsizing advice,
+        and multi-cluster are out of scope for now — and write operations are
+        out of scope permanently. Making the case for one of those is fair
+        game; just say why the core is better with it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: The situation you're in, not the solution you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What are you doing today instead?
