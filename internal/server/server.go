@@ -58,7 +58,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/capabilities", s.handleCapabilities)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
+		// A probe that hung up mid-response leaves us nothing to act on.
+		_, _ = fmt.Fprintln(w, "ok")
 	})
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.Handle("GET /", http.FileServerFS(s.static))
@@ -111,7 +112,7 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "ok")
+	_, _ = fmt.Fprintln(w, "ok")
 }
 
 // handleStream is the SSE endpoint. Each event is a full snapshot; the client
