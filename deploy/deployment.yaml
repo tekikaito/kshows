@@ -33,7 +33,7 @@ spec:
           # Pinned deliberately: :latest makes a rollout non-reproducible and
           # hides which version a cluster is actually running. Image tags carry
           # no "v" prefix — that lives on the git tag only.
-          image: ghcr.io/tekikaito/kshows:0.1.1
+          image: ghcr.io/tekikaito/kshows:0.2.0
           args: ["--listen=:8080"]
           ports:
             - name: http

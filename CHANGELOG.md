@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-26
+
 ### Added
 
 - **`/metrics` endpoint** exposing kshows' own operational metrics in
@@ -64,6 +66,7 @@ First release. Live, read-only, point-in-time capacity visualization.
 - **Deployment manifests** with a strictly read-only ClusterRole, a hardened
   non-root pod spec, and a distroless multi-arch container image.
 
-[Unreleased]: https://github.com/tekikaito/kshows/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/tekikaito/kshows/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/tekikaito/kshows/releases/tag/v0.2.0
 [0.1.1]: https://github.com/tekikaito/kshows/releases/tag/v0.1.1
 [0.1.0]: https://github.com/tekikaito/kshows/releases/tag/v0.1.0
