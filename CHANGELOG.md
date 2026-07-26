@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`/metrics` endpoint** exposing kshows' own operational metrics in
+  Prometheus format: poll duration and outcomes, optional-signal fetch results
+  split by definitive-absence vs. transient failure, live capability gauges,
+  connected SSE clients, snapshot age, and the standard Go runtime collectors.
+  The Deployment carries `prometheus.io/scrape` annotations. Cluster capacity
+  is deliberately *not* exported — that is kube-state-metrics' job, and
+  per-node series would explode cardinality and copy workload names into a
+  second system.
+
+### Changed
+
+- Dependencies: Kubernetes libraries to 0.36.3, Go toolchain to 1.26.
+
 ## [0.1.1] - 2026-07-26
 
 ### Fixed

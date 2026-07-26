@@ -15,6 +15,7 @@ import (
 
 	"github.com/tekikaito/kshows/internal/collector"
 	"github.com/tekikaito/kshows/internal/kube"
+	"github.com/tekikaito/kshows/internal/metrics"
 	"github.com/tekikaito/kshows/internal/server"
 	"github.com/tekikaito/kshows/web"
 )
@@ -34,6 +35,8 @@ func main() {
 		fmt.Println("kshows", version)
 		return
 	}
+
+	metrics.SetVersion(version)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

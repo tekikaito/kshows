@@ -134,7 +134,31 @@ The UI is just a client. Build your own on the same endpoints:
 - `GET /api/v1/snapshot` — the full model as JSON
 - `GET /api/v1/stream` — SSE snapshots every poll interval
 - `GET /api/v1/capabilities` — which signals are live
+- `GET /metrics` — Prometheus metrics (see below)
 - `GET /healthz` / `GET /readyz`
+
+## Observability
+
+`/metrics` reports **how kshows is doing its job** — not what it found. Pod
+security annotations for scraping are already on the Deployment.
+
+| Metric | Why you'd alert on it |
+|---|---|
+| `kshows_capability{signal}` | 1 when a signal is live, 0 when degraded. Catches a cluster that has silently lost the disk or usage dimension. |
+| `kshows_snapshot_timestamp_seconds` | Subtract from `now()` for staleness — the collector stopped producing snapshots. |
+| `kshows_poll_duration_seconds` | Polls creeping toward the 15s interval means the cluster has outgrown the poll budget. |
+| `kshows_poll_total{result}` | Polls that produced no snapshot at all. |
+| `kshows_signal_requests_total{signal,result}` | `absent` is definitive (not installed / forbidden); `error` is transient and subject to hysteresis. |
+| `kshows_stream_clients` | Connected SSE clients. A count that never returns to zero means the stream handler is leaking. |
+
+Plus the standard Go runtime and process collectors.
+
+**Cluster capacity is deliberately not exported here.** Per-node and per-pod
+series are [kube-state-metrics'](https://github.com/kubernetes/kube-state-metrics)
+job; duplicating them would explode label cardinality on large clusters and
+copy your workload names into a second system. Every series above is
+fixed-cardinality, and no node or pod name appears in any label — there's a
+test that enforces it.
 
 ## Development
 

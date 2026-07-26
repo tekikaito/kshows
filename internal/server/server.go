@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tekikaito/kshows/internal/collector"
+	"github.com/tekikaito/kshows/internal/metrics"
 	"github.com/tekikaito/kshows/internal/model"
 )
 
@@ -48,6 +49,7 @@ func (c *marshalCache) bytes(snap *model.Snapshot) ([]byte, error) {
 }
 
 func New(source collector.Source, static fs.FS) *Server {
+	metrics.WatchSnapshots(source.Latest)
 	return &Server{source: source, static: static}
 }
 
@@ -62,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 		_, _ = fmt.Fprintln(w, "ok")
 	})
 	mux.HandleFunc("GET /readyz", s.handleReady)
+	mux.Handle("GET /metrics", metrics.Handler())
 	mux.Handle("GET /", http.FileServerFS(s.static))
 	return mux
 }
@@ -130,6 +133,8 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	ch, cancel := s.source.Subscribe()
 	defer cancel()
+	metrics.StreamConnected()
+	defer metrics.StreamDisconnected()
 
 	// Send the current state immediately so a fresh tab paints without
 	// waiting a poll interval.

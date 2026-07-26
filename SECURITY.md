@@ -27,6 +27,12 @@ Summary API. Pod names and namespaces are the most sensitive data it handles,
 and they are rendered in the UI. It does not read Secrets, ConfigMaps,
 container logs, or pod contents.
 
+**What `/metrics` exposes.** Only kshows' own operating state: poll timing,
+signal health, connected clients, and cluster-wide node and pod *counts*. No
+node or pod name appears in any label, by design and under test. The endpoint
+is a narrower disclosure than the UI itself, but it is still unauthenticated —
+the exposure note below covers it too.
+
 ## Exposure is the operator's responsibility
 
 **kshows has no authentication or authorization for end users.** Anyone who

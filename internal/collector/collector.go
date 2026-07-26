@@ -7,6 +7,7 @@ package collector
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/tekikaito/kshows/internal/kube"
+	"github.com/tekikaito/kshows/internal/metrics"
 	"github.com/tekikaito/kshows/internal/model"
 )
 
@@ -150,15 +152,24 @@ func (c *Collector) publish(snap *model.Snapshot) {
 }
 
 func (c *Collector) poll(ctx context.Context) {
+	start := time.Now()
+	err := c.pollOnce(ctx)
+	metrics.ObservePoll(time.Since(start), err)
+	if err != nil {
+		c.logf("poll failed: %v", err)
+	}
+}
+
+// pollOnce assembles and publishes one snapshot. A returned error means no
+// snapshot was published at all; a degraded optional signal is not an error.
+func (c *Collector) pollOnce(ctx context.Context) error {
 	nodes, err := c.nodeLister.List(labels.Everything())
 	if err != nil {
-		c.logf("listing nodes from cache: %v", err)
-		return
+		return fmt.Errorf("listing nodes from cache: %w", err)
 	}
 	pods, err := c.podLister.List(labels.Everything())
 	if err != nil {
-		c.logf("listing pods from cache: %v", err)
-		return
+		return fmt.Errorf("listing pods from cache: %w", err)
 	}
 
 	podUsage, nodeUsage, metricsErr := c.fetchMetrics(ctx)
@@ -223,6 +234,7 @@ func (c *Collector) poll(ctx context.Context) {
 	sort.Slice(snap.Nodes, func(i, j int) bool { return snap.Nodes[i].Name < snap.Nodes[j].Name })
 
 	c.publish(snap)
+	return nil
 }
 
 // fetchMetrics polls the Metrics Server. A failure is not an error condition:
@@ -274,6 +286,7 @@ func metricsAbsent(err error) bool {
 func (c *Collector) noteMetrics(podUsage, nodeUsage map[string]model.Resources, err error) (map[string]model.Resources, map[string]model.Resources, bool) {
 	switch {
 	case err == nil:
+		metrics.RecordSignal(metrics.SignalMetrics, metrics.ResultSuccess)
 		if !c.metricsUp {
 			c.logf("metrics capability restored")
 		}
@@ -281,6 +294,7 @@ func (c *Collector) noteMetrics(podUsage, nodeUsage map[string]model.Resources, 
 		c.metricsFailures = 0
 		c.lastPodUsage, c.lastNodeUsage = podUsage, nodeUsage
 	case metricsAbsent(err):
+		metrics.RecordSignal(metrics.SignalMetrics, metrics.ResultAbsent)
 		if c.metricsUp {
 			c.logf("metrics.k8s.io not available: %v (degrading to requests/limits-only)", err)
 		}
@@ -288,6 +302,7 @@ func (c *Collector) noteMetrics(podUsage, nodeUsage map[string]model.Resources, 
 		c.metricsFailures = 0
 		c.lastPodUsage, c.lastNodeUsage = nil, nil
 	default:
+		metrics.RecordSignal(metrics.SignalMetrics, metrics.ResultError)
 		c.metricsFailures++
 		if c.metricsUp && c.metricsFailures >= capFailThreshold {
 			c.logf("metrics capability lost after %d consecutive failures: %v", c.metricsFailures, err)
@@ -320,6 +335,7 @@ func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[
 	c.lastDisk = time.Now()
 	switch {
 	case err == nil:
+		metrics.RecordSignal(metrics.SignalDisk, metrics.ResultSuccess)
 		if !c.diskLive {
 			c.logf("disk capability restored")
 		}
@@ -327,12 +343,14 @@ func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[
 		c.diskLive = true
 		c.diskFailures = 0
 	case errors.IsForbidden(err):
+		metrics.RecordSignal(metrics.SignalDisk, metrics.ResultAbsent)
 		// Definitive: RBAC won't heal on its own, so no hysteresis and no
 		// stale cache to serve. noteDiskForbidden already logged the hint.
 		c.diskByNode = disk
 		c.diskLive = false
 		c.diskFailures = 0
 	default:
+		metrics.RecordSignal(metrics.SignalDisk, metrics.ResultError)
 		// Transient: keep the cached per-node data and the previous
 		// capability until the failure streak proves the signal is gone.
 		c.diskFailures++
