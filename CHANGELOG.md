@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-26
+
+### Fixed
+
+- The published Deployment manifest referenced `ghcr.io/tekikaito/kshows:v0.1.0`,
+  but container tags carry no `v` prefix (that convention belongs to git tags),
+  so the image did not exist and `kubectl apply` from the v0.1.0 release failed
+  to pull. The manifest now pins the correct tag.
+
 ## [0.1.0] - 2026-07-26
 
 First release. Live, read-only, point-in-time capacity visualization.
@@ -40,5 +49,6 @@ First release. Live, read-only, point-in-time capacity visualization.
 - **Deployment manifests** with a strictly read-only ClusterRole, a hardened
   non-root pod spec, and a distroless multi-arch container image.
 
-[Unreleased]: https://github.com/tekikaito/kshows/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/tekikaito/kshows/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/tekikaito/kshows/releases/tag/v0.1.1
 [0.1.0]: https://github.com/tekikaito/kshows/releases/tag/v0.1.0
