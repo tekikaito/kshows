@@ -5,7 +5,7 @@ export function fmtCPU(millis) {
   if (millis == null) return "—";
   if (millis < 1000) return `${Math.round(millis)}m`;
   const cores = millis / 1000;
-  return `${cores >= 10 ? Math.round(cores) : cores.toFixed(cores >= 10 ? 0 : 1)} cores`;
+  return `${cores >= 10 ? Math.round(cores) : cores.toFixed(1)} cores`;
 }
 
 const BYTE_STEPS = [

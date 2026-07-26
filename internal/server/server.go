@@ -3,11 +3,14 @@
 package server
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/tekikaito/kshows/internal/collector"
@@ -17,6 +20,31 @@ import (
 type Server struct {
 	source collector.Source
 	static fs.FS
+	cache  marshalCache
+}
+
+// marshalCache holds the JSON encoding of the most recent snapshot. The
+// collector hands every subscriber (and Latest caller) the same immutable
+// pointer per tick, so pointer identity is a safe cache key — one marshal
+// per snapshot instead of one per connected client.
+type marshalCache struct {
+	mu   sync.Mutex
+	snap *model.Snapshot
+	data []byte
+}
+
+func (c *marshalCache) bytes(snap *model.Snapshot) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if snap == c.snap && c.data != nil {
+		return c.data, nil
+	}
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return nil, err
+	}
+	c.snap, c.data = snap, data
+	return data, nil
 }
 
 func New(source collector.Source, static fs.FS) *Server {
@@ -37,13 +65,35 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-func (s *Server) handleSnapshot(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	snap := s.source.Latest()
 	if snap == nil {
 		http.Error(w, `{"error":"no snapshot yet"}`, http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, snap)
+	data, err := s.cache.bytes(snap)
+	if err != nil {
+		http.Error(w, `{"error":"encoding snapshot"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	// gzip only this endpoint: the SSE stream must flush partial writes,
+	// which a gzip writer would buffer and break.
+	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		_, werr := gz.Write(data)
+		if cerr := gz.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			log.Printf("writing snapshot: %v", werr)
+		}
+		return
+	}
+	if _, err := w.Write(data); err != nil {
+		log.Printf("writing snapshot: %v", err)
+	}
 }
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
@@ -83,7 +133,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	// Send the current state immediately so a fresh tab paints without
 	// waiting a poll interval.
 	if snap := s.source.Latest(); snap != nil {
-		if err := writeEvent(w, snap); err != nil {
+		if err := s.writeEvent(w, snap); err != nil {
 			return
 		}
 		flusher.Flush()
@@ -102,7 +152,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case snap := <-ch:
-			if err := writeEvent(w, snap); err != nil {
+			if err := s.writeEvent(w, snap); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -110,8 +160,8 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func writeEvent(w http.ResponseWriter, snap *model.Snapshot) error {
-	data, err := json.Marshal(snap)
+func (s *Server) writeEvent(w http.ResponseWriter, snap *model.Snapshot) error {
+	data, err := s.cache.bytes(snap)
 	if err != nil {
 		return err
 	}

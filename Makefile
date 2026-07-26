@@ -1,6 +1,6 @@
 IMAGE ?= ghcr.io/tekikaito/kshows:latest
 
-.PHONY: build test vet run-mock image deploy
+.PHONY: build test vet lint run-mock image deploy
 
 build:
 	go build -o bin/kshows ./cmd/kshows
@@ -11,6 +11,14 @@ test:
 
 vet:
 	go vet ./...
+
+lint:
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run; \
+	else \
+		echo "golangci-lint not installed; falling back to go vet"; \
+		go vet ./...; \
+	fi
 
 run-mock: build
 	./bin/kshows --mock

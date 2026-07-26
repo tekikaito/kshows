@@ -1,0 +1,12 @@
+version: "2"
+
+# Correctness-only set; no style linters so the config stays uncontroversial.
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unused
