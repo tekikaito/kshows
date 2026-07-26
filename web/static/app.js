@@ -37,6 +37,12 @@ let hatchSeq = 0;
 
 const $ = (sel) => document.querySelector(sel);
 
+// Cluster-supplied strings (pod/node/namespace names, role labels) are
+// interpolated into innerHTML sinks — escape them, even though today's
+// DNS-1123 validation makes them tame.
+const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
+
 function nsColor(ns) {
   if (ns === "__more") return OTHER;
   if (!nsSlots.has(ns)) nsSlots.set(ns, nsSlots.size);
@@ -204,7 +210,7 @@ function renderLegend(snap) {
   const overflow = [...seen.keys()].filter((ns) => nsSlots.get(ns) >= NS_COLORS.length);
   let html = `<span class="cap">Namespaces</span>`;
   for (const ns of named)
-    html += `<button class="chip" data-ns="${ns}"><span class="sw" style="background:${nsColor(ns)}"></span>${ns}</button>`;
+    html += `<button class="chip" data-ns="${esc(ns)}"><span class="sw" style="background:${nsColor(ns)}"></span>${esc(ns)}</button>`;
   if (overflow.length)
     html += `<button class="chip" data-ns="__other"><span class="sw" style="background:${OTHER}"></span>other (${overflow.length})</button>`;
   $("#legend").innerHTML = html;
@@ -261,8 +267,8 @@ function updateCard(entry, node) {
   const { head, foot, svg } = entry;
   const dim = state.dimension;
 
-  let headHTML = `<span class="nname">${node.name}</span>`;
-  for (const r of node.roles || []) headHTML += `<span class="role">${r}</span>`;
+  let headHTML = `<span class="nname">${esc(node.name)}</span>`;
+  for (const r of node.roles || []) headHTML += `<span class="role">${esc(r)}</span>`;
   if (!node.ready) headHTML += `<span class="notready">✕ NotReady</span>`;
 
   if (dim === "disk") {
@@ -576,8 +582,8 @@ function tooltipHTML(pod) {
     if (pod.requests[k] > 0)
       rows.push(["of request", fmtPct(pod.usage[k] / pod.requests[k])]);
   }
-  return `<div class="t-name">${pod.name}</div>` +
-    `<div class="t-ns"><span class="sw" style="background:${nsColor(pod.namespace)}"></span>${pod.namespace}</div>` +
+  return `<div class="t-name">${esc(pod.name)}</div>` +
+    `<div class="t-ns"><span class="sw" style="background:${nsColor(pod.namespace)}"></span>${esc(pod.namespace)}</div>` +
     `<table>${rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join("")}</table>`;
 }
 
@@ -648,8 +654,8 @@ function podTableHTML(node) {
   const rows = pods.map((p) => {
     const reqPct = p.hasUsage && p.requests[k] > 0 ? p.usage[k] / p.requests[k] : null;
     return `<tr>
-      <td class="podname"><span class="sw" style="background:${nsColor(p.namespace)}"></span>${p.name}</td>
-      <td>${p.namespace}</td>
+      <td class="podname"><span class="sw" style="background:${nsColor(p.namespace)}"></span>${esc(p.name)}</td>
+      <td>${esc(p.namespace)}</td>
       <td>${fmtValue(dim, p.requests[k])}</td>
       <td>${p.limits[k] > 0 ? fmtValue(dim, p.limits[k]) : "—"}</td>
       <td>${p.hasUsage ? fmtValue(dim, p.usage[k]) : "—"}</td>
@@ -657,7 +663,7 @@ function podTableHTML(node) {
     </tr>`;
   }).join("");
   return `<table class="podtable">
-    <caption>Pods on ${node.name} — ${dim === "cpu" ? "CPU" : "memory"}</caption>
+    <caption>Pods on ${esc(node.name)} — ${dim === "cpu" ? "CPU" : "memory"}</caption>
     <thead><tr><th>Pod</th><th>Namespace</th><th>Request</th><th>Limit</th><th>Actual</th><th>% of req</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
