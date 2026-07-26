@@ -1,23 +1,74 @@
-# kshows — cluster capacity visualizer
+# kshows
 
-A browser-based spatial map of Kubernetes node capacity and how workloads fill
-it. Every node is a rectangle; pods are packed inside proportionally to their
-resource footprint. Three dimensions: **CPU** and **RAM** as per-pod treemaps,
-**disk** as a node-level fill.
+**See your cluster the way the scheduler can't: as physical space.**
 
-The signature view is the **requests-vs-actual dual encoding**: each pod block
-draws its *reservation* (request) as a dashed outline and its *actual usage*
-as the solid fill inside it. The gap between the two is your slack — visible
-at a glance, per pod, per node, across the cluster.
+kshows draws every Kubernetes node as a rectangle and packs its pods inside,
+sized by what they actually consume — not just what they asked for. One
+glance tells you which nodes are full, which are idling, where the slack
+hides, and which pod is about to blow past its reservation.
 
-- **Read-only, forever.** The ClusterRole has no write verbs of any kind.
-- **Cloud-agnostic.** Works on any conformant cluster: on-prem, bare-metal,
-  GKE, EKS, AKS.
-- **Degrades gracefully.** No Metrics Server? You get a requests/limits view
-  with a banner. `nodes/proxy` restricted? Disk shows capacity only.
-- **Single binary.** Go backend + embedded UI, ~zero-dependency frontend.
+![The ACTUAL view: pods packed per node, usage as solid fill inside dashed request outlines](docs/view-actual.png)
 
-## Quickstart (in-cluster, primary)
+---
+
+## Why another Kubernetes dashboard?
+
+Every dashboard can chart CPU over time. Almost none can answer the question
+an admin actually walks up with: **"how full are my machines, and is any of
+that reservation real?"**
+
+The tools that come closest each miss the mark: terminal-only and
+AWS-locked, or requests-based only, or archived. Nothing maintained shows
+*browser-based, proportional, usage-vs-reservation packing across CPU, RAM
+and disk* on any conformant cluster. kshows is that tool.
+
+|  | kshows |
+|---|---|
+| **Requests *and* actual usage** | Both, in one block — the dashed outline is the reservation, the solid fill is reality. The gap between them is your money. |
+| **Disk as a first-class dimension** | Node-level used-vs-free with warning thresholds, straight from the kubelet. Nobody else draws disk spatially. |
+| **Cloud-agnostic** | Pure Kubernetes APIs. on-prem, bare-metal, k3s, GKE, EKS, AKS — if it's conformant, it works. |
+| **Read-only, forever** | The ClusterRole contains zero write verbs. There is no write code path to audit, because there isn't one. |
+| **One small binary** | Go backend + embedded zero-dependency UI. Distroless image, ~64 MiB memory request. |
+
+## The signature view
+
+Toggle to **ACTUAL** and every pod block becomes two encodings at once:
+
+- **dashed outline** — what the pod *requested* (its reservation)
+- **solid fill** — what it's *using right now*, anchored bottom-left so
+  blocks read like filling containers
+- **amber flag** — pods bursting past their request (your OOM-kill and
+  eviction candidates)
+- **hatched region** — genuinely unallocated space on the node
+
+Over-provisioned teams show up as big dashed boxes with tiny fills.
+Under-provisioned ones show up amber. Both are visible from across the room.
+
+## More than one honest answer
+
+"How full is this node?" has three legitimate answers, and tools that pick
+one silently are lying to you. kshows makes the choice explicit:
+
+| Toggle | Blocks sized by | What it tells you |
+|---|---|---|
+| **REQUESTS** | scheduler reservations | what the scheduler believes |
+| **LIMITS** | declared ceilings | worst-case commitment (`over ×N` badges when a node is overcommitted) |
+| **ACTUAL** | live usage vs. request | the truth, and the gap |
+
+![The LIMITS view: overcommit is normal — and visible](docs/view-limits.png)
+
+Disk gets its own dimension — node-level fill with 75% / 90% thresholds:
+
+![The DISK view: used-vs-free per node with warning states](docs/view-disk.png)
+
+Click any node to drill in: a full-size treemap plus a sortable pod table
+with request, limit, actual, and %-of-request per pod.
+
+![Drill-in: one node, every pod, every number](docs/view-drill.png)
+
+## Quickstart
+
+**In-cluster (primary):**
 
 ```sh
 kubectl apply -f deploy/rbac.yaml -f deploy/deployment.yaml
@@ -25,88 +76,73 @@ kubectl -n kshows port-forward svc/kshows 8080:80
 # open http://localhost:8080
 ```
 
-Exposure beyond port-forward (Ingress, LoadBalancer) is the operator's call —
-kshows has no built-in auth in v1, so treat the Service as you would any
-internal dashboard.
-
-## Local mode (evaluation)
-
-The same binary runs outside the cluster against your kubeconfig — credential
-source is the only difference:
+**Local, against your kubeconfig:**
 
 ```sh
 go build -o bin/kshows ./cmd/kshows
-./bin/kshows                       # uses ~/.kube/config
-./bin/kshows --kubeconfig /path    # explicit path
+./bin/kshows            # uses ~/.kube/config — credential source is the only difference
 ```
 
-In local mode you inherit your own RBAC; with namespace-scoped access you'll
-see only what you can list.
-
-## Demo mode (no cluster at all)
+**No cluster handy?**
 
 ```sh
-./bin/kshows --mock
+./bin/kshows --mock     # simulated cluster with drifting usage
 ```
 
-Serves a simulated cluster with drifting usage — useful for trying the UI or
-developing the frontend.
+Live updates stream over SSE every 15s; blocks are keyed by pod UID, so
+changes animate instead of flickering. Views are shareable URLs:
+`/?dim=mem&metric=actual&node=worker-3`.
 
-## Views
+## Degrades gracefully, by design
 
-| Control | Choices | Meaning |
+kshows probes what your cluster can provide and never fakes the rest:
+
+| Missing | What you get instead |
+|---|---|
+| Metrics Server | requests/limits view + a banner; ACTUAL is disabled, never zeroed |
+| `nodes/proxy` access | disk shows capacity-only with a note |
+| Cluster-wide read (local mode) | whatever your own RBAC can see |
+
+## What it reads (and all it can do)
+
+| Signal | Source | RBAC |
 |---|---|---|
-| Dimension | CPU / RAM / DISK | which resource the map shows |
-| Metric | REQUESTS / LIMITS / ACTUAL | how pod blocks are sized |
+| Node capacity | `Node.status.allocatable` | `nodes: get,list,watch` |
+| Pod requests/limits | pod spec (incl. init/sidecar semantics) | `pods: get,list,watch` |
+| Live CPU/RAM | Metrics Server (`metrics.k8s.io`) | `nodes,pods: get,list` |
+| Node disk | kubelet Summary API via apiserver proxy | `nodes/proxy: get` |
 
-- **REQUESTS / LIMITS** — solid blocks sized by the declared value. Nodes
-  overcommitted on the chosen metric get an `over ×N` badge (normal for
-  limits) and the map scales to the committed total.
-- **ACTUAL** — the dual encoding. Block area = max(request, usage); dashed
-  outline = request; solid fill = live usage. Pods bursting past their
-  request are flagged with an amber outline.
-- **DISK** — node-level used-vs-free bar (v1 scope: no per-pod disk, no
-  PV/PVC attribution). Warns at 75%, critical at 90%.
-
-Hover any block for details; click a node card for the single-node view with
-a full pod table. Views are shareable via URL params:
-`/?dim=mem&metric=requests&node=node-02`.
-
-## Data sources
-
-| Signal | Source | Required RBAC | If missing |
-|---|---|---|---|
-| Node capacity | core API `Node.status.allocatable` | `nodes: get,list,watch` | — (required) |
-| Pod requests/limits | core API pod spec | `pods: get,list,watch` | — (required) |
-| CPU/RAM usage | Metrics Server (`metrics.k8s.io`) | `nodes,pods: get,list` | requests/limits view + banner |
-| Node disk | kubelet Summary API via apiserver proxy | `nodes/proxy: get` | capacity-only + note |
-
-Nodes and pods come from shared informer caches (no re-listing); metrics are
-polled every 15s (Metrics Server's own resolution), disk every 60s with
-bounded per-node concurrency.
+Nodes and pods come from shared informer caches — no cluster-wide re-listing
+per poll, cheap even on large clusters. Disk fan-out runs on a slower 60s
+cadence with bounded concurrency.
 
 ## API
 
-- `GET /api/v1/snapshot` — full current model (JSON)
-- `GET /api/v1/stream` — SSE; pushes a snapshot per poll, blocks keyed by pod UID
+The UI is just a client. Build your own on the same endpoints:
+
+- `GET /api/v1/snapshot` — the full model as JSON
+- `GET /api/v1/stream` — SSE snapshots every poll interval
 - `GET /api/v1/capabilities` — which signals are live
-- `GET /healthz` / `GET /readyz` — probes
+- `GET /healthz` / `GET /readyz`
 
 ## Development
 
 ```sh
 make build      # binary at bin/kshows
-make test       # Go + JS (layout math) tests
-make run-mock   # local UI against simulated data
-make image      # container image
+make test       # Go tests + treemap layout math tests
+make run-mock   # hack on the UI against simulated data
+make image      # distroless container image
 ```
 
-The frontend is plain ES modules + SVG, served from `web/static/` and embedded
-at build time — rebuild the binary to pick up UI changes. Treemap layout math
-(`treemap.js`) is renderer-agnostic; a Canvas renderer for very large clusters
-can replace the SVG layer without touching layout or data code.
+Frontend is plain ES modules + SVG (no framework, no build step), embedded
+into the binary. The squarified-treemap layout is pure math behind a
+renderer-agnostic interface — a Canvas renderer for thousand-node clusters
+can drop in without touching layout or data code.
 
-## Status
+## Scope (v1)
 
-v1 per the PRD: live point-in-time view, no history, no cost allocation, no
-multi-cluster, no write operations (ever). License: TBD (PRD open question).
+Live, point-in-time, read-only. Deliberately **not** included: history and
+trends, per-pod disk / PV attribution, cost allocation, rightsizing
+recommendations, multi-cluster, write operations (that one's permanent).
+
+License: TBD.
