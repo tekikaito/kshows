@@ -83,10 +83,7 @@ kubectl -n kshows port-forward svc/kshows 8080:80
 # open http://localhost:8080
 ```
 
-If your cluster restricts the kubelet proxy or has no Metrics Server, turn the
-matching permission off — kshows narrows the UI instead of failing:
-`--set rbac.nodesProxy=false`, `--set rbac.metrics=false`. See the
-[chart README](charts/kshows/README.md) for all values.
+See [Installing with Helm](#installing-with-helm) for configuration.
 
 **Plain manifests**, if you'd rather not use Helm:
 
@@ -117,6 +114,52 @@ go build -o bin/kshows ./cmd/kshows
 Live updates stream over SSE every 15s; blocks are keyed by pod UID, so
 changes animate instead of flickering. Views are shareable URLs:
 `/?dim=mem&metric=actual&node=worker-3`.
+
+## Installing with Helm
+
+The chart is an OCI artifact, so there's no `helm repo add` step — the URL is
+the repository.
+
+```sh
+helm install kshows oci://ghcr.io/tekikaito/charts/kshows \
+  --namespace kshows --create-namespace
+```
+
+Its install notes report which signals the release actually enabled, so you can
+confirm at a glance that a permission you withheld took effect.
+
+### Configuration
+
+| Situation | Flag |
+|---|---|
+| Cluster restricts the kubelet proxy (common on managed clusters) | `--set rbac.nodesProxy=false` — disk falls back to capacity-only |
+| No Metrics Server installed | `--set rbac.metrics=false` — requests/limits view only |
+| Large cluster | `--set resources.limits.memory=512Mi` — informers cache node and pod objects, so memory scales with pod count |
+| You run the Prometheus Operator | `--set serviceMonitor.enabled=true` |
+| Bind an existing ServiceAccount | `--set rbac.create=false --set serviceAccount.create=false --set serviceAccount.name=<yours>` |
+| Slower polling | `--set collector.pollInterval=30s` |
+
+The two `rbac.*` flags are the interesting ones: withholding a permission is a
+supported configuration, not a broken one. kshows detects what it cannot reach
+and narrows the UI with a banner rather than failing or rendering zeros.
+
+An Ingress is available (`--set ingress.enabled=true`) but **publishes your
+whole node and pod inventory** — kshows has no built-in authentication, so put
+some in front of it first.
+
+### Upgrade and uninstall
+
+```sh
+helm upgrade kshows oci://ghcr.io/tekikaito/charts/kshows -n kshows
+helm uninstall kshows -n kshows
+```
+
+Helm owns the ClusterRole and its binding, so uninstalling removes them too —
+no stray cluster-scoped permissions left behind. A namespace created with
+`--create-namespace` is Helm's one exception and stays; delete it separately if
+you want it gone.
+
+Full values table: [chart README](charts/kshows/README.md).
 
 ## Degrades gracefully, by design
 
