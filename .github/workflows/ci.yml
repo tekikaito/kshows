@@ -59,7 +59,7 @@ jobs:
       - run: kubeconform -strict -summary deploy/
       # The chart is a second install path for the same resources; render it
       # and validate the output the same way.
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - run: helm lint charts/kshows
       - name: Validate rendered chart (default and degraded RBAC)
         run: |
