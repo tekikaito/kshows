@@ -4,7 +4,7 @@
 # Pinned rather than floating on golang:1.25 so builds are reproducible and
 # the toolchain never drifts below the version go.mod requires. Dependabot
 # bumps this.
-FROM --platform=$BUILDPLATFORM golang:1.26.5 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.1 AS build
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
