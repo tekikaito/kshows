@@ -49,9 +49,6 @@ func (c *Collector) fetchDisk(ctx context.Context, nodeNames []string) (map[stri
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				if errors.IsForbidden(err) {
-					c.noteDiskForbidden()
-				}
 				if lastErr == nil || errors.IsForbidden(err) {
 					lastErr = err
 				}
@@ -94,11 +91,4 @@ func (c *Collector) fetchNodeDisk(ctx context.Context, nodeName string) (model.D
 		disk.AvailableBytes = int64(*fs.AvailableBytes)
 	}
 	return disk, nil
-}
-
-// noteDiskForbidden logs the RBAC fallback once instead of once per node per poll.
-func (c *Collector) noteDiskForbidden() {
-	c.diskForbiddenOnce.Do(func() {
-		c.logf("nodes/proxy is forbidden: falling back to capacity-only disk from node allocatable (grant nodes/proxy get for live disk usage)")
-	})
 }

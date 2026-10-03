@@ -140,8 +140,12 @@ confirm at a glance that a permission you withheld took effect.
 | Slower polling | `--set collector.pollInterval=30s` |
 
 The two `rbac.*` flags are the interesting ones: withholding a permission is a
-supported configuration, not a broken one. kshows detects what it cannot reach
-and narrows the UI with a banner rather than failing or rendering zeros.
+supported configuration, not a broken one. The chart then also tells kshows not
+to ask for that signal at all, so your audit log doesn't collect a denied
+request every poll, and the UI says the signal is switched off rather than
+failing or rendering zeros. With `rbac.create=false` you manage RBAC yourself;
+pass `--set extraArgs='{--node-disk=false}'` (or `--metrics-server=false`) for
+whatever you don't grant.
 
 An Ingress is available (`--set ingress.enabled=true`) but **publishes your
 whole node and pod inventory** — kshows has no built-in authentication, so put
@@ -169,6 +173,7 @@ kshows probes what your cluster can provide and never fakes the rest:
 |---|---|
 | Metrics Server | requests/limits view + a banner; ACTUAL is disabled, never zeroed |
 | `nodes/proxy` access | disk shows capacity-only with a note |
+| Permission withheld but not switched off | the same view; kshows asks again every 10 minutes, so a later grant is picked up without a restart |
 | Cluster-wide read (local mode) | whatever your own RBAC can see |
 
 ## What it reads (and all it can do)
@@ -180,6 +185,9 @@ kshows probes what your cluster can provide and never fakes the rest:
 | Live CPU/RAM | Metrics Server (`metrics.k8s.io`) | `nodes,pods: get,list` |
 | Node disk | kubelet Summary API via apiserver proxy | `nodes/proxy: get` |
 
+Either optional signal can be switched off with `--metrics-server=false` or
+`--node-disk=false`; kshows then never sends that request.
+
 Nodes and pods come from shared informer caches — no cluster-wide re-listing
 per poll, cheap even on large clusters. Disk fan-out runs on a slower 60s
 cadence with bounded concurrency.
@@ -190,7 +198,9 @@ The UI is just a client. Build your own on the same endpoints:
 
 - `GET /api/v1/snapshot` — the full model as JSON
 - `GET /api/v1/stream` — SSE snapshots every poll interval
-- `GET /api/v1/capabilities` — which signals are live
+- `GET /api/v1/capabilities` — which signals are live, and for one that isn't,
+  why (`metricsReason`/`diskReason`: `disabled`, `forbidden`, `absent`,
+  `unavailable`)
 - `GET /metrics` — Prometheus metrics (see below)
 - `GET /healthz` / `GET /readyz`
 

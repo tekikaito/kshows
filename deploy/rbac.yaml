@@ -21,12 +21,14 @@ rules:
     resources: ["nodes", "pods"]
     verbs: ["get", "list", "watch"]
   # Node-level disk via the kubelet Summary API (apiserver proxy).
-  # Optional: without it, kshows degrades to capacity-only disk.
+  # Optional: without it, kshows degrades to capacity-only disk. If you drop
+  # it, also pass --node-disk=false so kshows stops asking.
   - apiGroups: [""]
     resources: ["nodes/proxy"]
     verbs: ["get"]
   # Live CPU/RAM usage from the Metrics Server.
-  # Optional: without it, kshows degrades to a requests/limits-only view.
+  # Optional: without it, kshows degrades to a requests/limits-only view. If
+  # you drop it, also pass --metrics-server=false so kshows stops asking.
   - apiGroups: ["metrics.k8s.io"]
     resources: ["nodes", "pods"]
     verbs: ["get", "list"]

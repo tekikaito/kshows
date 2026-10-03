@@ -27,6 +27,8 @@ func main() {
 	listen := flag.String("listen", ":8080", "address to serve HTTP on")
 	kubeconfig := flag.String("kubeconfig", "", "path to kubeconfig (local mode; defaults to standard loading rules)")
 	pollInterval := flag.Duration("poll-interval", 15*time.Second, "how often to refresh usage from the Metrics Server")
+	metricsServer := flag.Bool("metrics-server", true, "read live CPU/RAM usage from the Metrics Server; false never asks for it")
+	nodeDisk := flag.Bool("node-disk", true, "read live node disk usage from the kubelet Summary API (needs get on nodes/proxy); false never asks for it")
 	mock := flag.Bool("mock", false, "serve simulated cluster data (no cluster needed; for demos and UI development)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -53,7 +55,11 @@ func main() {
 		if err != nil {
 			log.Fatalf("connecting to cluster: %v", err)
 		}
-		c := collector.New(clients, *pollInterval)
+		c := collector.New(clients, collector.Options{
+			PollInterval:  *pollInterval,
+			MetricsServer: *metricsServer,
+			NodeDisk:      *nodeDisk,
+		})
 		source, run = c, c.Run
 	}
 

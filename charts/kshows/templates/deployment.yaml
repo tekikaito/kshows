@@ -40,6 +40,16 @@ spec:
           args:
             - --listen=:8080
             - --poll-interval={{ .Values.collector.pollInterval }}
+            {{- if .Values.rbac.create }}
+            {{- /* A withheld permission is also never asked for, so the
+                   cluster's audit log doesn't collect a denial per poll. */}}
+            {{- if not .Values.rbac.metrics }}
+            - --metrics-server=false
+            {{- end }}
+            {{- if not .Values.rbac.nodesProxy }}
+            - --node-disk=false
+            {{- end }}
+            {{- end }}
             {{- with .Values.extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

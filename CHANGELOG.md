@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **A withheld permission is no longer asked for.** New flags
+  `--metrics-server` and `--node-disk` (both default `true`) switch the two
+  optional signals off entirely, and the Helm chart sets them whenever
+  `rbac.metrics` or `rbac.nodesProxy` is `false`. Before, kshows kept
+  requesting the signal anyway: a cluster without `nodes/proxy` got one denied
+  request per node every 60 seconds, which clutters API server audit logs and
+  looks like probing.
+- **A 403 is retried every 10 minutes instead of every cycle.** This applies
+  when a permission is missing but the signal is still switched on. A grant is
+  still picked up without a restart. A Metrics Server 403 used to count as a
+  transient error and was retried every poll; it is now treated like a
+  `nodes/proxy` 403.
+- **The UI says why a signal is missing.** `/api/v1/capabilities` and the
+  snapshot carry `metricsReason`/`diskReason` (`disabled`, `forbidden`,
+  `absent`, `unavailable`), and the banners distinguish a signal you switched
+  off from a missing permission or a Metrics Server that is down.
+
 ## [0.3.0] - 2026-07-26
 
 ### Added
