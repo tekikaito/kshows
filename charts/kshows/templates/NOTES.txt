@@ -21,6 +21,9 @@ Signals enabled by this release:
 {{- if .Values.rbac.create }}
   CPU / RAM usage    {{ if .Values.rbac.metrics }}yes — requires Metrics Server in the cluster{{ else }}NO — rbac.metrics=false, showing requests/limits only{{ end }}
   Node disk          {{ if .Values.rbac.nodesProxy }}yes — via the kubelet Summary API{{ else }}NO — rbac.nodesProxy=false, showing disk capacity only{{ end }}
+{{- if not (and .Values.rbac.metrics .Values.rbac.nodesProxy) }}
+  A withheld signal is switched off in kshows too: it is never requested.
+{{- end }}
 {{- else }}
   rbac.create=false — kshows uses the existing ServiceAccount {{ include "kshows.serviceAccountName" . }}.
   It needs get/list/watch on nodes and pods; anything missing degrades that

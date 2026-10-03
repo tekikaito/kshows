@@ -55,9 +55,27 @@ type Node struct {
 type Capabilities struct {
 	// Metrics is true when the Metrics Server (metrics.k8s.io) responds.
 	Metrics bool `json:"metrics"`
+	// MetricsReason says why Metrics is false; empty while it is true.
+	MetricsReason string `json:"metricsReason,omitempty"`
 	// Disk is true when at least one kubelet Summary API fetch succeeded.
 	Disk bool `json:"disk"`
+	// DiskReason says why Disk is false; empty while it is true.
+	DiskReason string `json:"diskReason,omitempty"`
 }
+
+// Reasons a capability is down, so the UI can say which one it is: a signal
+// the operator turned off is not a fault, and a permission problem has a
+// different fix than a missing Metrics Server.
+const (
+	// ReasonDisabled: turned off by flag, so never requested.
+	ReasonDisabled = "disabled"
+	// ReasonForbidden: RBAC denies it. Retried, but rarely.
+	ReasonForbidden = "forbidden"
+	// ReasonAbsent: the API is not installed (no Metrics Server).
+	ReasonAbsent = "absent"
+	// ReasonUnavailable: repeated transient failures.
+	ReasonUnavailable = "unavailable"
+)
 
 // Snapshot is the full current model served at /api/v1/snapshot and pushed
 // over /api/v1/stream.

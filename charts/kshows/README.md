@@ -18,8 +18,9 @@ kshows is read-only: the ClusterRole holds only `get`, `list`, and `watch`,
 and there is no code path that writes to the Kubernetes API.
 
 Two of its permissions are optional. If your platform team won't grant them,
-turn them off — kshows detects the missing signal and narrows the UI with an
-explanatory banner rather than failing or, worse, rendering zeros that look
+turn them off. The chart then also starts kshows with that signal switched off,
+so it never sends a request that would only be denied, and the UI narrows with
+an explanatory banner rather than failing or, worse, rendering zeros that look
 like real data.
 
 | Value | Grants | Withheld |
@@ -35,7 +36,9 @@ helm install kshows oci://ghcr.io/tekikaito/charts/kshows \
 ```
 
 To bind an existing ServiceAccount instead, set `rbac.create=false`,
-`serviceAccount.create=false`, and `serviceAccount.name=<yours>`.
+`serviceAccount.create=false`, and `serviceAccount.name=<yours>`. You then own
+the RBAC, so switch off whatever you don't grant yourself, e.g.
+`--set extraArgs='{--node-disk=false}'`.
 
 ## Values
 

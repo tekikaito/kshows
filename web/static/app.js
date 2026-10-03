@@ -154,7 +154,7 @@ function renderControls(caps) {
     const inDisk = state.dimension === "disk";
     if (btn.dataset.metric === "actual") {
       btn.disabled = inDisk || !caps.metrics;
-      btn.title = !caps.metrics ? "Metrics Server not detected" : "";
+      btn.title = !caps.metrics ? (caps.metricsReason === "disabled" ? "Live usage is switched off" : "Metrics Server not detected") : "";
     } else {
       btn.disabled = inDisk;
     }
@@ -162,12 +162,24 @@ function renderControls(caps) {
   }
 }
 
+// Keyed by capabilities.*Reason. A signal the operator switched off is a
+// choice, not a fault, so it reads as a plain statement rather than a problem.
+const METRICS_BANNERS = {
+  disabled: "<strong>Live CPU/RAM usage is switched off.</strong> Showing reserved capacity (requests/limits) only.",
+  forbidden: "<strong>No permission to read the Metrics Server.</strong> Showing reserved capacity (requests/limits) only — grant get/list on metrics.k8s.io for actual usage.",
+  unavailable: "<strong>Metrics Server not responding.</strong> Showing reserved capacity (requests/limits) until it answers again.",
+};
+const METRICS_BANNER_DEFAULT = "<strong>Metrics Server not detected.</strong> Showing reserved capacity (requests/limits) only — actual usage is unavailable on this cluster.";
+const DISK_BANNERS = {
+  disabled: "<strong>Live disk usage is switched off.</strong> Disk shows capacity only.",
+  forbidden: "<strong>No permission for live disk stats.</strong> The kubelet Summary API needs get on nodes/proxy — disk shows capacity only.",
+};
+const DISK_BANNER_DEFAULT = "<strong>Live disk stats unavailable.</strong> The kubelet Summary API (nodes/proxy) could not be reached — disk shows capacity only.";
+
 function renderBanners(caps) {
   const banners = [];
-  if (!caps.metrics)
-    banners.push("<strong>Metrics Server not detected.</strong> Showing reserved capacity (requests/limits) only — actual usage is unavailable on this cluster.");
-  if (!caps.disk)
-    banners.push("<strong>Live disk stats unavailable.</strong> The kubelet Summary API (nodes/proxy) could not be reached — disk shows capacity only.");
+  if (!caps.metrics) banners.push(METRICS_BANNERS[caps.metricsReason] ?? METRICS_BANNER_DEFAULT);
+  if (!caps.disk) banners.push(DISK_BANNERS[caps.diskReason] ?? DISK_BANNER_DEFAULT);
   $("#banners").innerHTML = banners.map((b) => `<div class="banner">${b}</div>`).join("");
 }
 
@@ -541,7 +553,7 @@ function renderDiskSVG(svg, node, W, H) {
     // Terse on purpose: the banner above carries the full explanation, and a
     // longer string clips at the card edge.
     mk("text", { class: "note", x: barX, y: barY + barH + 42 },
-      "live usage unavailable (nodes/proxy)");
+      state.snapshot.capabilities.diskReason === "disabled" ? "live usage switched off" : "live usage unavailable (nodes/proxy)");
   } else {
     mk("text", { class: "note", x: barX, y: barY + barH + 24 }, "no disk signal for this node");
   }

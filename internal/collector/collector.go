@@ -40,6 +40,10 @@ type Collector struct {
 	clients      *kube.Clients
 	pollInterval time.Duration
 
+	// Switches for the two optional signals. Off means never requested.
+	metricsEnabled bool
+	diskEnabled    bool
+
 	factory    informers.SharedInformerFactory
 	nodeLister corelisters.NodeLister
 	podLister  corelisters.PodLister
@@ -54,17 +58,30 @@ type Collector struct {
 	subs         map[chan *model.Snapshot]struct{}
 	diskByNode   map[string]model.Disk
 	diskLive     bool
+	diskReason   string
 	diskFailures int
 	lastDisk     time.Time
 
 	// Metrics hysteresis state; only the poll goroutine touches these.
 	metricsUp       bool
+	metricsReason   string
 	metricsFailures int
+	metricsRetryAt  time.Time // zero unless parked after a 403
 	lastPodUsage    map[string]model.Resources
 	lastNodeUsage   map[string]model.Resources
 
-	diskForbiddenOnce sync.Once
-	logf              func(format string, args ...any)
+	logf func(format string, args ...any)
+}
+
+// Options configures a Collector.
+type Options struct {
+	// PollInterval is how often a snapshot is assembled.
+	PollInterval time.Duration
+	// MetricsServer and NodeDisk switch the two optional signals. Off means
+	// the signal is never requested, so a cluster that withholds the
+	// permission on purpose sees no denied requests from kshows at all.
+	MetricsServer bool
+	NodeDisk      bool
 }
 
 // diskInterval is how often the per-node Summary API fan-out runs. Disk fills
@@ -75,16 +92,24 @@ const diskInterval = 60 * time.Second
 // drop a capability. One apiserver blip must not flap the UI banner.
 const capFailThreshold = 3
 
-func New(clients *kube.Clients, pollInterval time.Duration) *Collector {
+// forbiddenRetry is how long a signal stays parked after the API server
+// answers 403. A permission can be granted later, so kshows asks again, but
+// rarely: every denied request is an entry in the cluster's audit log, and an
+// admin who withheld the permission on purpose should not see one per poll.
+const forbiddenRetry = 10 * time.Minute
+
+func New(clients *kube.Clients, opts Options) *Collector {
 	factory := informers.NewSharedInformerFactory(clients.Core, 10*time.Minute)
 	c := &Collector{
-		clients:      clients,
-		pollInterval: pollInterval,
-		factory:      factory,
-		nodeLister:   factory.Core().V1().Nodes().Lister(),
-		podLister:    factory.Core().V1().Pods().Lister(),
-		subs:         make(map[chan *model.Snapshot]struct{}),
-		diskByNode:   map[string]model.Disk{},
+		clients:        clients,
+		pollInterval:   opts.PollInterval,
+		metricsEnabled: opts.MetricsServer,
+		diskEnabled:    opts.NodeDisk,
+		factory:        factory,
+		nodeLister:     factory.Core().V1().Nodes().Lister(),
+		podLister:      factory.Core().V1().Pods().Lister(),
+		subs:           make(map[chan *model.Snapshot]struct{}),
+		diskByNode:     map[string]model.Disk{},
 		// Start optimistic: a definitive absence or a failure streak flips
 		// these with one transition log, instead of a spurious "restored"
 		// on the first successful poll.
@@ -105,6 +130,12 @@ func (c *Collector) Run(ctx context.Context) error {
 		return ctx.Err()
 	}
 	c.logf("informer caches synced; polling every %s", c.pollInterval)
+	if !c.metricsEnabled {
+		c.logf("live CPU/RAM usage disabled (--metrics-server=false): showing requests/limits only")
+	}
+	if !c.diskEnabled {
+		c.logf("live node disk disabled (--node-disk=false): disk shows capacity only")
+	}
 
 	c.poll(ctx)
 	ticker := time.NewTicker(c.pollInterval)
@@ -172,9 +203,8 @@ func (c *Collector) pollOnce(ctx context.Context) error {
 		return fmt.Errorf("listing pods from cache: %w", err)
 	}
 
-	podUsage, nodeUsage, metricsErr := c.fetchMetrics(ctx)
-	podUsage, nodeUsage, metricsOK := c.noteMetrics(podUsage, nodeUsage, metricsErr)
-	diskByNode, diskLive := c.currentDisk(ctx, nodes)
+	podUsage, nodeUsage, metricsOK, metricsReason := c.currentMetrics(ctx)
+	diskByNode, diskLive, diskReason := c.currentDisk(ctx, nodes)
 
 	// Group scheduled, non-terminal pods by node.
 	podsByNode := make(map[string][]model.Pod, len(nodes))
@@ -201,8 +231,10 @@ func (c *Collector) pollOnce(ctx context.Context) error {
 		GeneratedAt: time.Now().UTC(),
 		Nodes:       make([]model.Node, 0, len(nodes)),
 		Capabilities: model.Capabilities{
-			Metrics: metricsOK,
-			Disk:    diskLive,
+			Metrics:       metricsOK,
+			MetricsReason: metricsReason,
+			Disk:          diskLive,
+			DiskReason:    diskReason,
 		},
 	}
 	for _, n := range nodes {
@@ -235,6 +267,20 @@ func (c *Collector) pollOnce(ctx context.Context) error {
 
 	c.publish(snap)
 	return nil
+}
+
+// currentMetrics returns the usage maps to build the snapshot from. It does
+// not touch the Metrics Server while the signal is disabled or parked after a
+// 403. Only called from the poll goroutine.
+func (c *Collector) currentMetrics(ctx context.Context) (map[string]model.Resources, map[string]model.Resources, bool, string) {
+	if !c.metricsEnabled {
+		return nil, nil, false, model.ReasonDisabled
+	}
+	if time.Now().Before(c.metricsRetryAt) {
+		return c.lastPodUsage, c.lastNodeUsage, c.metricsUp, c.metricsReason
+	}
+	podUsage, nodeUsage, err := c.fetchMetrics(ctx)
+	return c.noteMetrics(podUsage, nodeUsage, err)
 }
 
 // fetchMetrics polls the Metrics Server. A failure is not an error condition:
@@ -279,11 +325,12 @@ func metricsAbsent(err error) bool {
 }
 
 // noteMetrics folds one fetch result into the metrics capability state and
-// returns the usage maps to build the snapshot from. Definitive absence drops
-// the capability immediately; transient errors keep the last-known usage and
-// the previous capability until capFailThreshold consecutive failures. Only
+// returns the usage maps to build the snapshot from. Definitive absence or a
+// 403 drops the capability immediately (a 403 also parks the signal for
+// forbiddenRetry); transient errors keep the last-known usage and the
+// previous capability until capFailThreshold consecutive failures. Only
 // called from the poll goroutine.
-func (c *Collector) noteMetrics(podUsage, nodeUsage map[string]model.Resources, err error) (map[string]model.Resources, map[string]model.Resources, bool) {
+func (c *Collector) noteMetrics(podUsage, nodeUsage map[string]model.Resources, err error) (map[string]model.Resources, map[string]model.Resources, bool, string) {
 	switch {
 	case err == nil:
 		metrics.RecordSignal(metrics.SignalMetrics, metrics.ResultSuccess)
@@ -291,14 +338,27 @@ func (c *Collector) noteMetrics(podUsage, nodeUsage map[string]model.Resources, 
 			c.logf("metrics capability restored")
 		}
 		c.metricsUp = true
+		c.metricsReason = ""
 		c.metricsFailures = 0
 		c.lastPodUsage, c.lastNodeUsage = podUsage, nodeUsage
+	case errors.IsForbidden(err):
+		metrics.RecordSignal(metrics.SignalMetrics, metrics.ResultAbsent)
+		if c.metricsReason != model.ReasonForbidden {
+			c.logf("metrics.k8s.io is forbidden: showing requests/limits only; asking again every %s "+
+				"(grant get,list on metrics.k8s.io nodes and pods, or run with --metrics-server=false to stop asking)", forbiddenRetry)
+		}
+		c.metricsUp = false
+		c.metricsReason = model.ReasonForbidden
+		c.metricsFailures = 0
+		c.metricsRetryAt = time.Now().Add(forbiddenRetry)
+		c.lastPodUsage, c.lastNodeUsage = nil, nil
 	case metricsAbsent(err):
 		metrics.RecordSignal(metrics.SignalMetrics, metrics.ResultAbsent)
-		if c.metricsUp {
+		if c.metricsReason != model.ReasonAbsent {
 			c.logf("metrics.k8s.io not available: %v (degrading to requests/limits-only)", err)
 		}
 		c.metricsUp = false
+		c.metricsReason = model.ReasonAbsent
 		c.metricsFailures = 0
 		c.lastPodUsage, c.lastNodeUsage = nil, nil
 	default:
@@ -309,19 +369,30 @@ func (c *Collector) noteMetrics(podUsage, nodeUsage map[string]model.Resources, 
 			c.metricsUp = false
 			c.lastPodUsage, c.lastNodeUsage = nil, nil
 		}
+		if !c.metricsUp {
+			c.metricsReason = model.ReasonUnavailable
+		}
 	}
-	return c.lastPodUsage, c.lastNodeUsage, c.metricsUp
+	return c.lastPodUsage, c.lastNodeUsage, c.metricsUp, c.metricsReason
 }
 
 // currentDisk returns cached Summary API results, refreshing them on the
-// slower diskInterval cadence.
-func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[string]model.Disk, bool) {
+// slower diskInterval cadence, or on forbiddenRetry after a 403. It never
+// fetches while the signal is disabled.
+func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[string]model.Disk, bool, string) {
+	if !c.diskEnabled {
+		return nil, false, model.ReasonDisabled
+	}
 	c.mu.RLock()
-	fresh := time.Since(c.lastDisk) < diskInterval
-	cached, live := c.diskByNode, c.diskLive
+	wait := diskInterval
+	if c.diskReason == model.ReasonForbidden {
+		wait = forbiddenRetry
+	}
+	fresh := time.Since(c.lastDisk) < wait
+	cached, live, reason := c.diskByNode, c.diskLive, c.diskReason
 	c.mu.RUnlock()
 	if fresh {
-		return cached, live
+		return cached, live, reason
 	}
 
 	names := make([]string, 0, len(nodes))
@@ -341,13 +412,19 @@ func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[
 		}
 		c.diskByNode = disk
 		c.diskLive = true
+		c.diskReason = ""
 		c.diskFailures = 0
 	case errors.IsForbidden(err):
 		metrics.RecordSignal(metrics.SignalDisk, metrics.ResultAbsent)
-		// Definitive: RBAC won't heal on its own, so no hysteresis and no
-		// stale cache to serve. noteDiskForbidden already logged the hint.
+		// Definitive until someone changes RBAC: no hysteresis, no stale
+		// cache to serve, and the next attempt waits forbiddenRetry.
+		if c.diskReason != model.ReasonForbidden {
+			c.logf("nodes/proxy is forbidden: disk shows capacity only; asking again every %s "+
+				"(grant get on nodes/proxy for live usage, or run with --node-disk=false to stop asking)", forbiddenRetry)
+		}
 		c.diskByNode = disk
 		c.diskLive = false
+		c.diskReason = model.ReasonForbidden
 		c.diskFailures = 0
 	default:
 		metrics.RecordSignal(metrics.SignalDisk, metrics.ResultError)
@@ -363,8 +440,11 @@ func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[
 			// capacity-only until a fetch succeeds again.
 			c.diskByNode = map[string]model.Disk{}
 		}
+		if !c.diskLive {
+			c.diskReason = model.ReasonUnavailable
+		}
 	}
-	return c.diskByNode, c.diskLive
+	return c.diskByNode, c.diskLive, c.diskReason
 }
 
 func nodeReady(n *corev1.Node) bool {

@@ -109,7 +109,7 @@ func newTestCollector(t *testing.T, coreObjs, metricsObjs []runtime.Object) (*Co
 	core := corefake.NewSimpleClientset(coreObjs...)
 	metrics := metricsfake.NewSimpleClientset()
 	seedMetrics(t, metrics, metricsObjs)
-	c := New(&kube.Clients{Core: core, Metrics: metrics}, time.Second)
+	c := New(&kube.Clients{Core: core, Metrics: metrics}, Options{PollInterval: time.Second, MetricsServer: true, NodeDisk: true})
 	c.logf = t.Logf
 	c.diskFetch = func(ctx context.Context, names []string) (map[string]model.Disk, error) {
 		return map[string]model.Disk{}, nil
@@ -496,7 +496,7 @@ func TestDiskCapability(t *testing.T) {
 // --- publish / subscribe ---------------------------------------------------------
 
 func TestSubscribePublish(t *testing.T) {
-	c := New(&kube.Clients{Core: corefake.NewSimpleClientset(), Metrics: metricsfake.NewSimpleClientset()}, time.Second)
+	c := New(&kube.Clients{Core: corefake.NewSimpleClientset(), Metrics: metricsfake.NewSimpleClientset()}, Options{PollInterval: time.Second})
 	c.logf = t.Logf
 
 	ch, cancel := c.Subscribe()
@@ -577,5 +577,158 @@ func TestMockUsageSums(t *testing.T) {
 		if sum != n.Usage {
 			t.Errorf("node %s usage = %+v, want the sum of its pods %+v", n.Name, n.Usage, sum)
 		}
+	}
+}
+
+// --- withheld permissions ---------------------------------------------------------
+
+// rewindDisk backdates the last disk fetch by d.
+func rewindDisk(c *Collector, d time.Duration) {
+	c.mu.Lock()
+	c.lastDisk = time.Now().Add(-d)
+	c.mu.Unlock()
+}
+
+func TestDiskForbiddenBacksOff(t *testing.T) {
+	coreObjs := []runtime.Object{
+		testNode("n1", true, nil, allocList("4", "16Gi", "50Gi", "110")),
+	}
+	c, _ := newTestCollector(t, coreObjs, nil)
+
+	liveDisk := model.Disk{CapacityBytes: 100, UsedBytes: 40, AvailableBytes: 60, Live: true}
+	forbidden := apierrors.NewForbidden(schema.GroupResource{Resource: "nodes"}, "n1", stderrors.New("nodes/proxy denied"))
+	transient := apierrors.NewInternalError(stderrors.New("kubelet timeout"))
+
+	fetchCalls := 0
+	var injected error
+	c.diskFetch = func(ctx context.Context, names []string) (map[string]model.Disk, error) {
+		fetchCalls++
+		if injected != nil {
+			return map[string]model.Disk{}, injected
+		}
+		return map[string]model.Disk{"n1": liveDisk}, nil
+	}
+
+	// Order-dependent sequence: each step backdates the last fetch by age,
+	// then polls once.
+	steps := []struct {
+		name       string
+		age        time.Duration
+		err        error
+		wantFetch  bool
+		wantReason string
+	}{
+		{"forbidden on the first fetch", 0, forbidden, true, model.ReasonForbidden},
+		{"the normal disk interval does not retry a 403", 2 * diskInterval, forbidden, false, model.ReasonForbidden},
+		{"just short of forbiddenRetry still waits", forbiddenRetry - time.Minute, forbidden, false, model.ReasonForbidden},
+		{"forbiddenRetry elapsed asks again", forbiddenRetry + time.Second, forbidden, true, model.ReasonForbidden},
+		{"a grant is picked up on the next retry", forbiddenRetry + time.Second, nil, true, ""},
+		{"back on the normal interval once live", diskInterval + time.Second, nil, true, ""},
+		{"transient failure 1 keeps it live", diskInterval + time.Second, transient, true, ""},
+		{"transient failure 2 keeps it live", diskInterval + time.Second, transient, true, ""},
+		{"transient failure 3 reports unavailable", diskInterval + time.Second, transient, true, model.ReasonUnavailable},
+	}
+	for i, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			if i == 0 {
+				forceDiskRefresh(c)
+			} else {
+				rewindDisk(c, step.age)
+			}
+			injected = step.err
+			before := fetchCalls
+			c.poll(context.Background())
+			if fetched := fetchCalls > before; fetched != step.wantFetch {
+				t.Errorf("fetch ran = %v, want %v", fetched, step.wantFetch)
+			}
+			caps := c.Latest().Capabilities
+			if caps.DiskReason != step.wantReason {
+				t.Errorf("DiskReason = %q, want %q", caps.DiskReason, step.wantReason)
+			}
+			if caps.Disk != (step.wantReason == "") {
+				t.Errorf("Disk = %v with reason %q", caps.Disk, caps.DiskReason)
+			}
+		})
+	}
+}
+
+func TestMetricsForbiddenBacksOff(t *testing.T) {
+	coreObjs, metricsObjs := hysteresisFixtures()
+	c, metricsClient := newTestCollector(t, coreObjs, metricsObjs)
+	var injected error
+	injectMetricsError(metricsClient, &injected)
+	forbidden := apierrors.NewForbidden(schema.GroupResource{Group: "metrics.k8s.io", Resource: "nodes"}, "", stderrors.New("denied"))
+
+	lists := func() int { return len(metricsClient.Actions()) }
+
+	injected = forbidden
+	c.poll(context.Background())
+	caps := c.Latest().Capabilities
+	if caps.Metrics || caps.MetricsReason != model.ReasonForbidden {
+		t.Fatalf("after a 403: capabilities = %+v, want metrics down as forbidden", caps)
+	}
+	if c.Latest().Nodes[0].HasUsage {
+		t.Error("usage present after a 403, want none")
+	}
+
+	before := lists()
+	for range 5 {
+		c.poll(context.Background())
+	}
+	if got := lists() - before; got != 0 {
+		t.Errorf("parked signal made %d metrics requests, want 0", got)
+	}
+	if r := c.Latest().Capabilities.MetricsReason; r != model.ReasonForbidden {
+		t.Errorf("MetricsReason while parked = %q, want %q", r, model.ReasonForbidden)
+	}
+
+	// The retry time passes and the permission has been granted meanwhile.
+	c.metricsRetryAt = time.Now().Add(-time.Second)
+	injected = nil
+	c.poll(context.Background())
+	caps = c.Latest().Capabilities
+	if !caps.Metrics || caps.MetricsReason != "" {
+		t.Errorf("after the grant: capabilities = %+v, want metrics live with no reason", caps)
+	}
+	if !c.Latest().Nodes[0].HasUsage {
+		t.Error("usage missing after the grant")
+	}
+}
+
+func TestDisabledSignalsAreNeverRequested(t *testing.T) {
+	coreObjs, metricsObjs := hysteresisFixtures()
+	core := corefake.NewSimpleClientset(coreObjs...)
+	metricsClient := metricsfake.NewSimpleClientset()
+	seedMetrics(t, metricsClient, metricsObjs)
+	c := New(&kube.Clients{Core: core, Metrics: metricsClient}, Options{PollInterval: time.Second})
+	c.logf = t.Logf
+	diskCalls := 0
+	c.diskFetch = func(ctx context.Context, names []string) (map[string]model.Disk, error) {
+		diskCalls++
+		return map[string]model.Disk{}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	c.factory.Start(ctx.Done())
+	c.factory.WaitForCacheSync(ctx.Done())
+
+	seeded := len(metricsClient.Actions())
+	for range 3 {
+		forceDiskRefresh(c)
+		c.poll(context.Background())
+	}
+	if diskCalls != 0 {
+		t.Errorf("disk fetched %d times with --node-disk=false, want 0", diskCalls)
+	}
+	if got := len(metricsClient.Actions()) - seeded; got != 0 {
+		t.Errorf("%d metrics requests with --metrics-server=false, want 0", got)
+	}
+	snap := c.Latest()
+	want := model.Capabilities{MetricsReason: model.ReasonDisabled, DiskReason: model.ReasonDisabled}
+	if snap.Capabilities != want {
+		t.Errorf("capabilities = %+v, want %+v", snap.Capabilities, want)
+	}
+	if d := snap.Nodes[0].Disk; d.Live || d.CapacityBytes != 50<<30 {
+		t.Errorf("node disk = %+v, want the capacity-only fallback", d)
 	}
 }
