@@ -34,7 +34,9 @@ spec:
           # hides which version a cluster is actually running. Image tags carry
           # no "v" prefix — that lives on the git tag only.
           image: ghcr.io/tekikaito/kshows:0.3.0
-          args: ["--listen=:8080"]
+          # --node-disk=kubelet matches rbac.yaml, which grants nodes/stats
+          # but not nodes/proxy.
+          args: ["--listen=:8080", "--node-disk=kubelet"]
           ports:
             - name: http
               containerPort: 8080

@@ -132,9 +132,9 @@ confirm at a glance that a permission you withheld took effect.
 
 | Situation | Flag |
 |---|---|
-| Least privilege for node disk | `--set rbac.nodesProxy=false` — disk is read from each kubelet directly with `nodes/stats`, which cannot exec into pods |
-| Kubelets with self-signed serving certificates (kubeadm's default) | `--set collector.kubeletInsecureTLS=true`, or keep `rbac.nodesProxy` as the fallback |
-| No live disk at all | `--set rbac.nodeStats=false --set rbac.nodesProxy=false` — disk shows capacity only |
+| Kubelets with self-signed serving certificates (kubeadm's default) | `--set collector.kubeletInsecureTLS=true` |
+| Pods cannot reach the kubelet port (10250) | `--set rbac.nodesProxy=true` — disk goes through the API server instead, at the cost of a broader grant |
+| No live disk at all | `--set rbac.nodeStats=false` — disk shows capacity only |
 | No Metrics Server installed | `--set rbac.metrics=false` — requests/limits view only |
 | Large cluster | `--set resources.limits.memory=512Mi` — informers cache node and pod objects, so memory scales with pod count |
 | You run the Prometheus Operator | `--set serviceMonitor.enabled=true` |
@@ -193,7 +193,8 @@ authorized as `nodes/proxy`, and that grant also reaches the kubelet's `exec`
 and `run` endpoints: effectively root on every node. The kubelet itself
 authorizes `/stats/*` as `nodes/stats`, which reads statistics and nothing
 else. So kshows asks the kubelet directly, verifying its serving certificate
-against the cluster CA, and only falls back to the proxy if you grant it.
+against the cluster CA, and only falls back to the proxy if you grant it (`rbac.nodesProxy`, off by
+default).
 `--node-disk` picks the route: `auto` (default: direct, then proxy), `kubelet`,
 `proxy`, or `off`. The direct route needs pods to reach the kubelet port
 (10250); if a NetworkPolicy restricts kshows' egress, allow it to the node

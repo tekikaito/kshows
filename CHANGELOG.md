@@ -14,11 +14,16 @@ All notable changes to this project are documented here. The format follows
   needs `nodes/proxy`, which also reaches the kubelet's exec and run endpoints.
   The kubelet's serving certificate is verified against the cluster CA;
   `--kubelet-insecure-tls` (chart: `collector.kubeletInsecureTLS`) covers
-  self-signed kubelets. The chart grants the new `rbac.nodeStats` by default
-  and keeps `rbac.nodesProxy` as the fallback; set `rbac.nodesProxy=false` for
-  least privilege.
+  self-signed kubelets. The chart grants the new `rbac.nodeStats` by default.
 
 ### Changed
+
+- **The chart no longer grants `nodes/proxy` by default** (`rbac.nodesProxy`
+  is now `false`), and neither do the manifests in `deploy/`. Live disk comes
+  from the direct route above. **Upgrading:** if live disk disappears after
+  the upgrade, the log says why. For self-signed kubelet certificates, set
+  `collector.kubeletInsecureTLS=true`; if pods cannot reach the kubelet port,
+  allow egress to the nodes on 10250 or set `rbac.nodesProxy=true`.
 
 - **A withheld permission is no longer asked for.** New flags
   `--metrics-server` (default `true`) and `--node-disk`
