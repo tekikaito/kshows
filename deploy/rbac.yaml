@@ -25,14 +25,10 @@ rules:
   - apiGroups: [""]
     resources: ["nodes/stats"]
     verbs: ["get"]
-  # The same data through the API server proxy, the fallback when pods cannot
-  # reach the kubelet port. This grant also reaches the kubelet's exec and run
-  # endpoints: drop it if the direct route works, and pass --node-disk=kubelet.
-  # Without either rule, kshows degrades to capacity-only disk; pass
-  # --node-disk=off so it stops asking.
-  - apiGroups: [""]
-    resources: ["nodes/proxy"]
-    verbs: ["get"]
+  # Not granted: nodes/proxy, the same data through the API server. It also
+  # reaches the kubelet's exec and run endpoints. Add it, and switch
+  # --node-disk to auto in deployment.yaml, only if pods cannot reach the
+  # kubelet port. Without nodes/stats either, pass --node-disk=off.
   # Live CPU/RAM usage from the Metrics Server.
   # Optional: without it, kshows degrades to a requests/limits-only view. If
   # you drop it, also pass --metrics-server=false so kshows stops asking.

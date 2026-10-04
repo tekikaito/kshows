@@ -29,9 +29,10 @@ rbac:
   # cluster CA. nodesProxy goes through the API server instead, but the grant
   # also reaches the kubelet's exec and run endpoints. With both, kshows uses
   # the direct route and falls back to the proxy. With neither, disk shows
-  # capacity only.
+  # capacity only. nodesProxy is off by default: turn it on only if the
+  # direct route cannot work on your cluster.
   nodeStats: true
-  nodesProxy: true
+  nodesProxy: false
   # Live CPU/RAM usage from the Metrics Server. Without it, kshows shows
   # reserved capacity (requests/limits) and disables the actual-usage view.
   metrics: true

@@ -29,12 +29,18 @@ like real data.
 | `rbac.nodeStats` | `nodes/stats`, to read each kubelet's Summary API directly | Disk falls back to `nodesProxy`, or capacity only |
 | `rbac.nodesProxy` | `nodes/proxy`, the same data through the API server; also reaches the kubelet's exec and run | Disk uses `nodeStats` alone, or capacity only |
 
+`rbac.nodesProxy` is off by default. Turn it on only when pods cannot reach
+the kubelet port (10250) and you would rather grant the broader permission
+than lose live disk usage:
+
 ```sh
-# Least privilege: live disk without nodes/proxy
 helm install kshows oci://ghcr.io/tekikaito/charts/kshows \
   --namespace kshows --create-namespace \
-  --set rbac.nodesProxy=false
+  --set rbac.nodesProxy=true
 ```
+
+For kubelets with self-signed serving certificates, prefer
+`--set collector.kubeletInsecureTLS=true` over the proxy.
 
 To bind an existing ServiceAccount instead, set `rbac.create=false`,
 `serviceAccount.create=false`, and `serviceAccount.name=<yours>`. You then own
@@ -51,7 +57,7 @@ the RBAC, so switch off whatever you don't grant yourself, e.g.
 | `rbac.create` | `true` | Create the read-only ClusterRole and binding |
 | `rbac.metrics` | `true` | Grant `metrics.k8s.io` for live CPU/RAM |
 | `rbac.nodeStats` | `true` | Grant `nodes/stats` to read live node disk from each kubelet |
-| `rbac.nodesProxy` | `true` | Grant `nodes/proxy` as the fallback route for live node disk |
+| `rbac.nodesProxy` | `false` | Grant `nodes/proxy` as the fallback route for live node disk |
 | `serviceAccount.create` | `true` | |
 | `serviceAccount.name` | `""` | Generated from the release name when empty |
 | `collector.pollInterval` | `15s` | Metrics Server's own resolution; faster gains nothing |
