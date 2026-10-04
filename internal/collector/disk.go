@@ -184,7 +184,7 @@ func (c *Collector) fetchKubeletDisk(ctx context.Context, node *corev1.Node) (mo
 	if err != nil {
 		return model.Disk{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxSummaryBytes))
 	if err != nil {
 		return model.Disk{}, fmt.Errorf("reading stats/summary from %s: %w", node.Name, err)
@@ -250,11 +250,11 @@ func newKubeletClient(cfg *rest.Config, insecureTLS bool) (*http.Client, error) 
 	}
 	cfg = rest.CopyConfig(cfg)
 	// A ServerName pinned for the API server would fail every kubelet check.
-	cfg.TLSClientConfig.ServerName = ""
+	cfg.ServerName = ""
 	if insecureTLS {
-		cfg.TLSClientConfig.Insecure = true
-		cfg.TLSClientConfig.CAFile = ""
-		cfg.TLSClientConfig.CAData = nil
+		cfg.Insecure = true
+		cfg.CAFile = ""
+		cfg.CAData = nil
 	}
 	rt, err := rest.TransportFor(cfg)
 	if err != nil {
