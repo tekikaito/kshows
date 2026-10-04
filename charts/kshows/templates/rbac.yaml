@@ -26,8 +26,17 @@ rules:
   - apiGroups: [""]
     resources: ["nodes", "pods"]
     verbs: ["get", "list", "watch"]
+  {{- if .Values.rbac.nodeStats }}
+  # Optional: node disk, read from each kubelet directly. The kubelet
+  # authorizes /stats/* as nodes/stats, which reads statistics and nothing else.
+  - apiGroups: [""]
+    resources: ["nodes/stats"]
+    verbs: ["get"]
+  {{- end }}
   {{- if .Values.rbac.nodesProxy }}
-  # Optional: node disk via the kubelet Summary API.
+  # Optional: node disk through the API server proxy, the fallback when the
+  # kubelet is not reachable directly. This grant also reaches the kubelet's
+  # exec and run endpoints; prefer nodeStats where it works.
   - apiGroups: [""]
     resources: ["nodes/proxy"]
     verbs: ["get"]

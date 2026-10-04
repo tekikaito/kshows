@@ -28,10 +28,19 @@ func main() {
 	kubeconfig := flag.String("kubeconfig", "", "path to kubeconfig (local mode; defaults to standard loading rules)")
 	pollInterval := flag.Duration("poll-interval", 15*time.Second, "how often to refresh usage from the Metrics Server")
 	metricsServer := flag.Bool("metrics-server", true, "read live CPU/RAM usage from the Metrics Server; false never asks for it")
-	nodeDisk := flag.Bool("node-disk", true, "read live node disk usage from the kubelet Summary API (needs get on nodes/proxy); false never asks for it")
+	nodeDisk := flag.String("node-disk", collector.NodeDiskAuto,
+		"where live node disk usage comes from: kubelet (direct, needs get on nodes/stats), proxy (via the API server, needs get on nodes/proxy), auto (kubelet, then proxy), or off")
+	kubeletInsecureTLS := flag.Bool("kubelet-insecure-tls", false, "do not verify kubelet serving certificates on the direct route (for self-signed kubelet certificates)")
 	mock := flag.Bool("mock", false, "serve simulated cluster data (no cluster needed; for demos and UI development)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+
+	switch *nodeDisk {
+	case collector.NodeDiskAuto, collector.NodeDiskKubelet, collector.NodeDiskProxy, collector.NodeDiskOff:
+	default:
+		fmt.Fprintf(os.Stderr, "kshows: --node-disk must be auto, kubelet, proxy or off, not %q\n", *nodeDisk)
+		os.Exit(2)
+	}
 
 	if *showVersion {
 		fmt.Println("kshows", version)
@@ -56,9 +65,10 @@ func main() {
 			log.Fatalf("connecting to cluster: %v", err)
 		}
 		c := collector.New(clients, collector.Options{
-			PollInterval:  *pollInterval,
-			MetricsServer: *metricsServer,
-			NodeDisk:      *nodeDisk,
+			PollInterval:       *pollInterval,
+			MetricsServer:      *metricsServer,
+			NodeDisk:           *nodeDisk,
+			KubeletInsecureTLS: *kubeletInsecureTLS,
 		})
 		source, run = c, c.Run
 	}

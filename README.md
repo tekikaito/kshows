@@ -132,20 +132,22 @@ confirm at a glance that a permission you withheld took effect.
 
 | Situation | Flag |
 |---|---|
-| Cluster restricts the kubelet proxy (common on managed clusters) | `--set rbac.nodesProxy=false` — disk falls back to capacity-only |
+| Least privilege for node disk | `--set rbac.nodesProxy=false` — disk is read from each kubelet directly with `nodes/stats`, which cannot exec into pods |
+| Kubelets with self-signed serving certificates (kubeadm's default) | `--set collector.kubeletInsecureTLS=true`, or keep `rbac.nodesProxy` as the fallback |
+| No live disk at all | `--set rbac.nodeStats=false --set rbac.nodesProxy=false` — disk shows capacity only |
 | No Metrics Server installed | `--set rbac.metrics=false` — requests/limits view only |
 | Large cluster | `--set resources.limits.memory=512Mi` — informers cache node and pod objects, so memory scales with pod count |
 | You run the Prometheus Operator | `--set serviceMonitor.enabled=true` |
 | Bind an existing ServiceAccount | `--set rbac.create=false --set serviceAccount.create=false --set serviceAccount.name=<yours>` |
 | Slower polling | `--set collector.pollInterval=30s` |
 
-The two `rbac.*` flags are the interesting ones: withholding a permission is a
+The optional `rbac.*` flags are the interesting ones: withholding a permission is a
 supported configuration, not a broken one. The chart then also tells kshows not
 to ask for that signal at all, so your audit log doesn't collect a denied
 request every poll, and the UI says the signal is switched off rather than
 failing or rendering zeros. With `rbac.create=false` you manage RBAC yourself;
-pass `--set extraArgs='{--node-disk=false}'` (or `--metrics-server=false`) for
-whatever you don't grant.
+pass `--node-disk=kubelet|proxy|off` and `--metrics-server=false` through
+`extraArgs` to match what you grant.
 
 An Ingress is available (`--set ingress.enabled=true`) but **publishes your
 whole node and pod inventory** — kshows has no built-in authentication, so put
@@ -172,7 +174,7 @@ kshows probes what your cluster can provide and never fakes the rest:
 | Missing | What you get instead |
 |---|---|
 | Metrics Server | requests/limits view + a banner; ACTUAL is disabled, never zeroed |
-| `nodes/proxy` access | disk shows capacity-only with a note |
+| `nodes/stats` and `nodes/proxy` access | disk shows capacity-only with a note |
 | Permission withheld but not switched off | the same view; kshows asks again every 10 minutes, so a later grant is picked up without a restart |
 | Cluster-wide read (local mode) | whatever your own RBAC can see |
 
@@ -183,10 +185,23 @@ kshows probes what your cluster can provide and never fakes the rest:
 | Node capacity | `Node.status.allocatable` | `nodes: get,list,watch` |
 | Pod requests/limits | pod spec (incl. init/sidecar semantics) | `pods: get,list,watch` |
 | Live CPU/RAM | Metrics Server (`metrics.k8s.io`) | `nodes,pods: get,list` |
-| Node disk | kubelet Summary API via apiserver proxy | `nodes/proxy: get` |
+| Node disk | kubelet Summary API, from each kubelet directly | `nodes/stats: get` |
+| Node disk (fallback) | the same, through the API server proxy | `nodes/proxy: get` |
+
+**Why two routes for disk.** Through the API server, the whole kubelet path is
+authorized as `nodes/proxy`, and that grant also reaches the kubelet's `exec`
+and `run` endpoints: effectively root on every node. The kubelet itself
+authorizes `/stats/*` as `nodes/stats`, which reads statistics and nothing
+else. So kshows asks the kubelet directly, verifying its serving certificate
+against the cluster CA, and only falls back to the proxy if you grant it.
+`--node-disk` picks the route: `auto` (default: direct, then proxy), `kubelet`,
+`proxy`, or `off`. The direct route needs pods to reach the kubelet port
+(10250); if a NetworkPolicy restricts kshows' egress, allow it to the node
+addresses. Kubelets with self-signed certificates need
+`--kubelet-insecure-tls`, the same trade-off metrics-server offers.
 
 Either optional signal can be switched off with `--metrics-server=false` or
-`--node-disk=false`; kshows then never sends that request.
+`--node-disk=off`; kshows then never sends that request.
 
 Nodes and pods come from shared informer caches — no cluster-wide re-listing
 per poll, cheap even on large clusters. Disk fan-out runs on a slower 60s

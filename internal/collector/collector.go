@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -42,16 +43,25 @@ type Collector struct {
 
 	// Switches for the two optional signals. Off means never requested.
 	metricsEnabled bool
-	diskEnabled    bool
+	diskMode       string // one of the NodeDisk* constants
 
 	factory    informers.SharedInformerFactory
 	nodeLister corelisters.NodeLister
 	podLister  corelisters.PodLister
 
-	// diskFetch performs the kubelet Summary API fan-out. It is a function
-	// field so tests can substitute it: the fake clientset cannot serve
-	// CoreV1().RESTClient() calls. Production always uses (*Collector).fetchDisk.
-	diskFetch func(ctx context.Context, names []string) (map[string]model.Disk, error)
+	// diskFetch performs the kubelet Summary API fan-out, and kubeletDisk and
+	// proxyDisk are its two per-node routes. They are function fields so tests
+	// can substitute them: the fake clientset cannot serve RESTClient() calls.
+	// Production always uses the methods of the same names.
+	diskFetch   func(ctx context.Context, nodes []*corev1.Node) (map[string]model.Disk, error)
+	kubeletDisk diskRouteFunc
+	proxyDisk   diskRouteFunc
+	// diskRoute is the route auto mode settled on; empty until one answers.
+	// Only the poll goroutine touches it.
+	diskRoute string
+
+	kubeletHTTP    *http.Client
+	kubeletHTTPErr error // why kubeletHTTP is nil
 
 	mu           sync.RWMutex
 	latest       *model.Snapshot
@@ -77,11 +87,16 @@ type Collector struct {
 type Options struct {
 	// PollInterval is how often a snapshot is assembled.
 	PollInterval time.Duration
-	// MetricsServer and NodeDisk switch the two optional signals. Off means
-	// the signal is never requested, so a cluster that withholds the
-	// permission on purpose sees no denied requests from kshows at all.
+	// MetricsServer switches live CPU/RAM usage. Off means it is never
+	// requested, so a cluster that withholds the permission on purpose sees
+	// no denied requests from kshows at all. NodeDisk does the same for node
+	// disk and picks its route: one of the NodeDisk* constants, where the
+	// empty string means NodeDiskOff.
 	MetricsServer bool
-	NodeDisk      bool
+	NodeDisk      string
+	// KubeletInsecureTLS skips verifying the kubelet's serving certificate
+	// on the direct route. Only for kubelets with self-signed certificates.
+	KubeletInsecureTLS bool
 }
 
 // diskInterval is how often the per-node Summary API fan-out runs. Disk fills
@@ -104,7 +119,7 @@ func New(clients *kube.Clients, opts Options) *Collector {
 		clients:        clients,
 		pollInterval:   opts.PollInterval,
 		metricsEnabled: opts.MetricsServer,
-		diskEnabled:    opts.NodeDisk,
+		diskMode:       opts.NodeDisk,
 		factory:        factory,
 		nodeLister:     factory.Core().V1().Nodes().Lister(),
 		podLister:      factory.Core().V1().Pods().Lister(),
@@ -117,7 +132,15 @@ func New(clients *kube.Clients, opts Options) *Collector {
 		diskLive:  true,
 		logf:      log.Printf,
 	}
+	if c.diskMode == "" {
+		c.diskMode = NodeDiskOff
+	}
 	c.diskFetch = c.fetchDisk
+	c.kubeletDisk = c.fetchKubeletDisk
+	c.proxyDisk = c.fetchProxyDisk
+	if c.diskMode == NodeDiskAuto || c.diskMode == NodeDiskKubelet {
+		c.kubeletHTTP, c.kubeletHTTPErr = newKubeletClient(clients.Config, opts.KubeletInsecureTLS)
+	}
 	return c
 }
 
@@ -133,8 +156,11 @@ func (c *Collector) Run(ctx context.Context) error {
 	if !c.metricsEnabled {
 		c.logf("live CPU/RAM usage disabled (--metrics-server=false): showing requests/limits only")
 	}
-	if !c.diskEnabled {
-		c.logf("live node disk disabled (--node-disk=false): disk shows capacity only")
+	if c.diskMode == NodeDiskOff {
+		c.logf("live node disk disabled (--node-disk=off): disk shows capacity only")
+	}
+	if c.kubeletHTTPErr != nil {
+		c.logf("cannot build a client for direct kubelet access: %v", c.kubeletHTTPErr)
 	}
 
 	c.poll(ctx)
@@ -380,7 +406,7 @@ func (c *Collector) noteMetrics(podUsage, nodeUsage map[string]model.Resources, 
 // slower diskInterval cadence, or on forbiddenRetry after a 403. It never
 // fetches while the signal is disabled.
 func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[string]model.Disk, bool, string) {
-	if !c.diskEnabled {
+	if c.diskMode == NodeDiskOff {
 		return nil, false, model.ReasonDisabled
 	}
 	c.mu.RLock()
@@ -395,11 +421,7 @@ func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[
 		return cached, live, reason
 	}
 
-	names := make([]string, 0, len(nodes))
-	for _, n := range nodes {
-		names = append(names, n.Name)
-	}
-	disk, err := c.diskFetch(ctx, names)
+	disk, err := c.diskFetch(ctx, nodes)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -419,8 +441,8 @@ func (c *Collector) currentDisk(ctx context.Context, nodes []*corev1.Node) (map[
 		// Definitive until someone changes RBAC: no hysteresis, no stale
 		// cache to serve, and the next attempt waits forbiddenRetry.
 		if c.diskReason != model.ReasonForbidden {
-			c.logf("nodes/proxy is forbidden: disk shows capacity only; asking again every %s "+
-				"(grant get on nodes/proxy for live usage, or run with --node-disk=false to stop asking)", forbiddenRetry)
+			c.logf("node disk is forbidden (%v): disk shows capacity only; asking again every %s "+
+				"(grant get on nodes/stats for live usage, or run with --node-disk=off to stop asking)", err, forbiddenRetry)
 		}
 		c.diskByNode = disk
 		c.diskLive = false

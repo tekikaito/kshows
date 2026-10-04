@@ -45,7 +45,7 @@ body:
       label: Startup logs
       description: >
         The first few lines kshows logs. Capability problems (missing Metrics
-        Server, restricted nodes/proxy) almost always show up there.
+        Server, restricted nodes/stats or nodes/proxy) almost always show up there.
       render: text
 
   - type: textarea
