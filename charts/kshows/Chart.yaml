@@ -4,8 +4,8 @@ description: A spatial map of Kubernetes node capacity — pods packed into node
 type: application
 # Kept in lockstep with the application: this chart exists to ship kshows, not
 # as an independently versioned artifact.
-version: 0.3.0
-appVersion: "v0.3.0"
+version: 0.4.0
+appVersion: "v0.4.0"
 home: https://github.com/tekikaito/kshows
 sources:
   - https://github.com/tekikaito/kshows
