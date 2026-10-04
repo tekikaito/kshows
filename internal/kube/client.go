@@ -20,6 +20,10 @@ type Clients struct {
 	Metrics metricsclient.Interface
 	// InCluster reports which credential source was used.
 	InCluster bool
+	// Config is the configuration both clients were built from, for callers
+	// that talk to something other than the API server with the same
+	// credentials (the kubelets).
+	Config *rest.Config
 }
 
 // New tries in-cluster config first, then falls back to the given kubeconfig
@@ -42,7 +46,7 @@ func New(kubeconfig string) (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("building metrics client: %w", err)
 	}
-	return &Clients{Core: core, Metrics: metrics, InCluster: inCluster}, nil
+	return &Clients{Core: core, Metrics: metrics, InCluster: inCluster, Config: cfg}, nil
 }
 
 func restConfig(kubeconfig string) (*rest.Config, bool, error) {

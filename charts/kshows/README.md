@@ -26,10 +26,11 @@ like real data.
 | Value | Grants | Withheld |
 |---|---|---|
 | `rbac.metrics` | `metrics.k8s.io` on nodes and pods | No actual-usage view; requests/limits only |
-| `rbac.nodesProxy` | `nodes/proxy` (kubelet Summary API) | Disk shows capacity only, no live usage |
+| `rbac.nodeStats` | `nodes/stats`, to read each kubelet's Summary API directly | Disk falls back to `nodesProxy`, or capacity only |
+| `rbac.nodesProxy` | `nodes/proxy`, the same data through the API server; also reaches the kubelet's exec and run | Disk uses `nodeStats` alone, or capacity only |
 
 ```sh
-# For a cluster that restricts the kubelet proxy, as some managed ones do
+# Least privilege: live disk without nodes/proxy
 helm install kshows oci://ghcr.io/tekikaito/charts/kshows \
   --namespace kshows --create-namespace \
   --set rbac.nodesProxy=false
@@ -38,7 +39,7 @@ helm install kshows oci://ghcr.io/tekikaito/charts/kshows \
 To bind an existing ServiceAccount instead, set `rbac.create=false`,
 `serviceAccount.create=false`, and `serviceAccount.name=<yours>`. You then own
 the RBAC, so switch off whatever you don't grant yourself, e.g.
-`--set extraArgs='{--node-disk=false}'`.
+`--set extraArgs='{--node-disk=kubelet}'` when you grant only `nodes/stats`.
 
 ## Values
 
@@ -49,10 +50,12 @@ the RBAC, so switch off whatever you don't grant yourself, e.g.
 | `image.tag` | `""` | Defaults to the chart's `appVersion` |
 | `rbac.create` | `true` | Create the read-only ClusterRole and binding |
 | `rbac.metrics` | `true` | Grant `metrics.k8s.io` for live CPU/RAM |
-| `rbac.nodesProxy` | `true` | Grant `nodes/proxy` for live node disk |
+| `rbac.nodeStats` | `true` | Grant `nodes/stats` to read live node disk from each kubelet |
+| `rbac.nodesProxy` | `true` | Grant `nodes/proxy` as the fallback route for live node disk |
 | `serviceAccount.create` | `true` | |
 | `serviceAccount.name` | `""` | Generated from the release name when empty |
 | `collector.pollInterval` | `15s` | Metrics Server's own resolution; faster gains nothing |
+| `collector.kubeletInsecureTLS` | `false` | Skip verifying kubelet certificates on the direct disk route (self-signed kubelets) |
 | `extraArgs` | `[]` | Additional container flags |
 | `service.type` | `ClusterIP` | |
 | `service.port` | `80` | |

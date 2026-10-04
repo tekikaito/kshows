@@ -109,9 +109,9 @@ func newTestCollector(t *testing.T, coreObjs, metricsObjs []runtime.Object) (*Co
 	core := corefake.NewSimpleClientset(coreObjs...)
 	metrics := metricsfake.NewSimpleClientset()
 	seedMetrics(t, metrics, metricsObjs)
-	c := New(&kube.Clients{Core: core, Metrics: metrics}, Options{PollInterval: time.Second, MetricsServer: true, NodeDisk: true})
+	c := New(&kube.Clients{Core: core, Metrics: metrics}, Options{PollInterval: time.Second, MetricsServer: true, NodeDisk: NodeDiskAuto})
 	c.logf = t.Logf
-	c.diskFetch = func(ctx context.Context, names []string) (map[string]model.Disk, error) {
+	c.diskFetch = func(ctx context.Context, nodes []*corev1.Node) (map[string]model.Disk, error) {
 		return map[string]model.Disk{}, nil
 	}
 
@@ -163,7 +163,7 @@ func TestPollSnapshotAssembly(t *testing.T) {
 	c, _ := newTestCollector(t, coreObjs, metricsObjs)
 
 	liveDisk := model.Disk{CapacityBytes: 111, UsedBytes: 42, AvailableBytes: 69, Live: true}
-	c.diskFetch = func(ctx context.Context, names []string) (map[string]model.Disk, error) {
+	c.diskFetch = func(ctx context.Context, nodes []*corev1.Node) (map[string]model.Disk, error) {
 		return map[string]model.Disk{"node-a": liveDisk}, nil
 	}
 
@@ -436,7 +436,7 @@ func TestDiskCapability(t *testing.T) {
 
 	fetchCalls := 0
 	var injected error
-	c.diskFetch = func(ctx context.Context, names []string) (map[string]model.Disk, error) {
+	c.diskFetch = func(ctx context.Context, nodes []*corev1.Node) (map[string]model.Disk, error) {
 		fetchCalls++
 		if injected != nil {
 			return map[string]model.Disk{}, injected
@@ -601,7 +601,7 @@ func TestDiskForbiddenBacksOff(t *testing.T) {
 
 	fetchCalls := 0
 	var injected error
-	c.diskFetch = func(ctx context.Context, names []string) (map[string]model.Disk, error) {
+	c.diskFetch = func(ctx context.Context, nodes []*corev1.Node) (map[string]model.Disk, error) {
 		fetchCalls++
 		if injected != nil {
 			return map[string]model.Disk{}, injected
@@ -703,7 +703,7 @@ func TestDisabledSignalsAreNeverRequested(t *testing.T) {
 	c := New(&kube.Clients{Core: core, Metrics: metricsClient}, Options{PollInterval: time.Second})
 	c.logf = t.Logf
 	diskCalls := 0
-	c.diskFetch = func(ctx context.Context, names []string) (map[string]model.Disk, error) {
+	c.diskFetch = func(ctx context.Context, nodes []*corev1.Node) (map[string]model.Disk, error) {
 		diskCalls++
 		return map[string]model.Disk{}, nil
 	}
@@ -718,7 +718,7 @@ func TestDisabledSignalsAreNeverRequested(t *testing.T) {
 		c.poll(context.Background())
 	}
 	if diskCalls != 0 {
-		t.Errorf("disk fetched %d times with --node-disk=false, want 0", diskCalls)
+		t.Errorf("disk fetched %d times with --node-disk=off, want 0", diskCalls)
 	}
 	if got := len(metricsClient.Actions()) - seeded; got != 0 {
 		t.Errorf("%d metrics requests with --metrics-server=false, want 0", got)

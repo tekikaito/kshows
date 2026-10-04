@@ -20,8 +20,8 @@ Reach it:
 Signals enabled by this release:
 {{- if .Values.rbac.create }}
   CPU / RAM usage    {{ if .Values.rbac.metrics }}yes — requires Metrics Server in the cluster{{ else }}NO — rbac.metrics=false, showing requests/limits only{{ end }}
-  Node disk          {{ if .Values.rbac.nodesProxy }}yes — via the kubelet Summary API{{ else }}NO — rbac.nodesProxy=false, showing disk capacity only{{ end }}
-{{- if not (and .Values.rbac.metrics .Values.rbac.nodesProxy) }}
+  Node disk          {{ if and .Values.rbac.nodeStats .Values.rbac.nodesProxy }}yes — kubelet directly (nodes/stats), API server proxy as fallback{{ else if .Values.rbac.nodeStats }}yes — kubelet directly (nodes/stats){{ else if .Values.rbac.nodesProxy }}yes — via the API server proxy (nodes/proxy){{ else }}NO — rbac.nodeStats and rbac.nodesProxy are false, showing disk capacity only{{ end }}
+{{- if not (and .Values.rbac.metrics (or .Values.rbac.nodeStats .Values.rbac.nodesProxy)) }}
   A withheld signal is switched off in kshows too: it is never requested.
 {{- end }}
 {{- else }}

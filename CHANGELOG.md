@@ -6,12 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Live node disk without `nodes/proxy`.** kshows now reads the kubelet
+  Summary API from each kubelet directly, where it is authorized as
+  `nodes/stats`: statistics only. Through the API server the same request
+  needs `nodes/proxy`, which also reaches the kubelet's exec and run endpoints.
+  The kubelet's serving certificate is verified against the cluster CA;
+  `--kubelet-insecure-tls` (chart: `collector.kubeletInsecureTLS`) covers
+  self-signed kubelets. The chart grants the new `rbac.nodeStats` by default
+  and keeps `rbac.nodesProxy` as the fallback; set `rbac.nodesProxy=false` for
+  least privilege.
+
 ### Changed
 
 - **A withheld permission is no longer asked for.** New flags
-  `--metrics-server` and `--node-disk` (both default `true`) switch the two
-  optional signals off entirely, and the Helm chart sets them whenever
-  `rbac.metrics` or `rbac.nodesProxy` is `false`. Before, kshows kept
+  `--metrics-server` (default `true`) and `--node-disk`
+  (`auto|kubelet|proxy|off`, default `auto`) switch the optional signals off
+  or pin the disk route, and the Helm chart sets them from the `rbac.*` grants. Before, kshows kept
   requesting the signal anyway: a cluster without `nodes/proxy` got one denied
   request per node every 60 seconds, which clutters API server audit logs and
   looks like probing.

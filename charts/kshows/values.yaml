@@ -22,8 +22,15 @@ serviceAccount:
 # explanatory banner rather than failing.
 rbac:
   create: true
-  # Live per-node disk usage via the kubelet Summary API. Some managed
-  # clusters restrict nodes/proxy; without it, disk shows capacity only.
+  # Live per-node disk usage comes from the kubelet Summary API, by one of two
+  # routes. nodeStats reads each kubelet directly and can read nothing but
+  # statistics; it needs pods to reach the kubelet port (10250) and, unless
+  # collector.kubeletInsecureTLS is set, a kubelet certificate signed by the
+  # cluster CA. nodesProxy goes through the API server instead, but the grant
+  # also reaches the kubelet's exec and run endpoints. With both, kshows uses
+  # the direct route and falls back to the proxy. With neither, disk shows
+  # capacity only.
+  nodeStats: true
   nodesProxy: true
   # Live CPU/RAM usage from the Metrics Server. Without it, kshows shows
   # reserved capacity (requests/limits) and disables the actual-usage view.
@@ -33,6 +40,9 @@ collector:
   # Metrics Server resolves at roughly this cadence; polling faster gains
   # nothing. Node disk refreshes on a slower internal timer.
   pollInterval: 15s
+  # Skip verifying kubelet serving certificates on the direct disk route.
+  # Only for kubelets with self-signed certificates (kubeadm's default).
+  kubeletInsecureTLS: false
 
 # Extra flags for the container, e.g. ["--kubeconfig=/etc/kube/config"].
 extraArgs: []

@@ -20,9 +20,16 @@ rules:
   - apiGroups: [""]
     resources: ["nodes", "pods"]
     verbs: ["get", "list", "watch"]
-  # Node-level disk via the kubelet Summary API (apiserver proxy).
-  # Optional: without it, kshows degrades to capacity-only disk. If you drop
-  # it, also pass --node-disk=false so kshows stops asking.
+  # Node-level disk, read from each kubelet directly (kubelet Summary API).
+  # The kubelet authorizes /stats/* as nodes/stats: statistics and nothing else.
+  - apiGroups: [""]
+    resources: ["nodes/stats"]
+    verbs: ["get"]
+  # The same data through the API server proxy, the fallback when pods cannot
+  # reach the kubelet port. This grant also reaches the kubelet's exec and run
+  # endpoints: drop it if the direct route works, and pass --node-disk=kubelet.
+  # Without either rule, kshows degrades to capacity-only disk; pass
+  # --node-disk=off so it stops asking.
   - apiGroups: [""]
     resources: ["nodes/proxy"]
     verbs: ["get"]

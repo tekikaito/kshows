@@ -46,9 +46,17 @@ spec:
             {{- if not .Values.rbac.metrics }}
             - --metrics-server=false
             {{- end }}
-            {{- if not .Values.rbac.nodesProxy }}
-            - --node-disk=false
+            {{- /* Node disk: the route follows the grants. Both means auto. */}}
+            {{- if and .Values.rbac.nodeStats (not .Values.rbac.nodesProxy) }}
+            - --node-disk=kubelet
+            {{- else if and .Values.rbac.nodesProxy (not .Values.rbac.nodeStats) }}
+            - --node-disk=proxy
+            {{- else if not (or .Values.rbac.nodeStats .Values.rbac.nodesProxy) }}
+            - --node-disk=off
             {{- end }}
+            {{- end }}
+            {{- if .Values.collector.kubeletInsecureTLS }}
+            - --kubelet-insecure-tls
             {{- end }}
             {{- with .Values.extraArgs }}
             {{- toYaml . | nindent 12 }}
